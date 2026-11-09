@@ -15,6 +15,7 @@
  * and installs the weekly digest trigger (Mondays ~12:00 London).
  */
 
+var API_VERSION = 3;   // bump when the app needs new server behaviour; the app warns if the deployed script is older
 var TX_SHEET = 'Transactions';
 var POT_SHEET = 'Pots';
 var HEADERS = ['id', 'created_at', 'date', 'type', 'description', 'amount_pence', 'paid_by',
@@ -23,7 +24,7 @@ var HEADERS = ['id', 'created_at', 'date', 'type', 'description', 'amount_pence'
 /* ───────────── entry points ───────────── */
 
 function doGet() {
-  return json_({ ok: true, service: 'settle-up' });
+  return json_({ ok: true, service: 'settle-up', version: API_VERSION });
 }
 
 function doPost(e) {
@@ -110,6 +111,7 @@ function normEmail_(raw) {
 function state_(me) {
   var cfg = config_();
   return {
+    version: API_VERSION,
     me: me,
     users: cfg.users,
     currency: cfg.currency,

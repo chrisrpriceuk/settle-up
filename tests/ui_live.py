@@ -14,7 +14,7 @@ class Server:
     def __init__(self):
         self.rows = [dict(id='seed1', type='expense', date='2026-11-01', description='Seed shop', amount_pence=10000,
                           paid_by=B, other_share_pct=50, pot='Main', status='active', created_by=B, created_at='2026-11-01T10:00:00Z', group_id='')]
-        self.pots = ['Main']; self.log = []; self.online = True; self.drop_response_once = False
+        self.pots = ['Main']; self.log = []; self.online = True; self.drop_response_once = False; self.version = 3
     def net(self):
         out = {}
         for r in self.rows:
@@ -23,7 +23,10 @@ class Server:
             d = r['amount_pence'] if r['type'] == 'settlement' else round(r['amount_pence'] * r['other_share_pct'] / 100 + 1e-9)
             out[r['pot']] = out.get(r['pot'], 0) + s * d
         return out
-    def state(self): return dict(me=A, users=USERS, currency='£', pots=self.pots, rows=self.rows)
+    def state(self):
+        s = dict(me=A, users=USERS, currency='£', pots=self.pots, rows=self.rows)
+        if self.version is not None: s['version'] = self.version     # an old script sends no version at all
+        return s
     def handle(self, q):
         a = q['action']; self.log.append(a)
         if a == 'state': return dict(ok=True, state=self.state())
@@ -90,6 +93,7 @@ async def main(root):
         txt = lambda: pg.inner_text('#view')
                 # Chris is A: Natalie paid 100 at 50% => Chris owes Natalie 50
         check('balance direction', 'You owe Natalie £50.00' in await txt())
+        check('up-to-date server: no warning banner', 'out of date' not in await txt())
 
         # 1. adding an expense is instant
         await pg.click('nav [data-tab=add]'); await pg.fill('#amt', '30'); await pg.fill('#desc', 'Pizza')
@@ -215,6 +219,22 @@ async def main(root):
         await pg.keyboard.press('Escape')
         chips = [s.strip().lower() for s in await pg.locator('label:has-text("Pot") + .chips .chip').all_inner_texts()]
         check('Add form pot chips use the same order', chips[:4] == ['main', 'holiday', 'zoo', 'alpha'], chips)
+        # 8. an out-of-date server script is detected up front, and part payments are blocked (it would record the full amount)
+        S.version = None
+        await pg.reload(); await pg.wait_for_selector('.card')
+        await pg.wait_for_function("document.body.innerText.indexOf('out of date')>=0", timeout=8000)
+        check('old server: warning banner is shown', True)
+        await pg.click('text=Settle up Zoo'); await pg.wait_for_selector('dialog[open]')
+        await pg.locator('dialog input').fill('5')
+        check('old server: part payment is blocked', await pg.locator('dialog button.primary').is_disabled() and 'Update the server script' in await pg.inner_text('dialog'))
+        await pg.locator('dialog input').fill('20.00')
+        check('old server: a full settle-up is still allowed', not await pg.locator('dialog button.primary').is_disabled())
+        await pg.keyboard.press('Escape')
+        S.version = 3
+        await pg.reload(); await pg.wait_for_selector('.card')
+        check('after the script is updated no stale warning flashes up from the cache', 'out of date' not in await txt())
+        await pg.wait_for_timeout(1800)
+        check('and it is still gone once fresh data arrives', 'out of date' not in await txt())
         check('no JS errors', not errs, errs)
         await b.close()
     print('\nFAILED: ' + ', '.join(fails) if fails else '\nALL PASSED')

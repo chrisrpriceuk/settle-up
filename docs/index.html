@@ -255,7 +255,10 @@ const remote = {
 const api = LIVE ? remote : demo;
 
 /* ───── app state ───── */
-let S = { users: [], me: null, currency: '£', pots: [], rows: [] };
+let S = { users: [], me: null, currency: '£', pots: [], rows: [], version: null };
+const SERVER_MIN = 3;   // oldest server script that supports part payments safely
+/** True only when we KNOW the deployed script is too old (an unknown version, e.g. cached data, is not a warning). */
+const serverOld = () => LIVE && S.version != null && S.version < SERVER_MIN;
 let tab = 'home';
 let histPot = 'All';
 let form = null;          // add/edit form state
@@ -294,11 +297,13 @@ function orderedPots() { return L.sortPots(pots(), netFor(allRows())); }
 const mine = (net) => (S.me === A().email ? net : -net);
 
 function cacheState() {
-  if (LIVE) store.set('su-cache', { users: S.users, me: S.me, currency: S.currency, pots: S.pots, rows: S.rows });
+  if (LIVE) store.set('su-cache', { users: S.users, me: S.me, currency: S.currency, pots: S.pots, rows: S.rows, version: S.version });
 }
 function applyState(st) {
   if (!st) return;
   S.users = st.users; S.currency = st.currency || '£'; S.pots = st.pots; S.rows = st.rows;
+  // Cached data never claims a version (so no stale warning flashes); a live reply with no version means an old script.
+  S.version = st.cached ? null : (st.version === undefined ? 0 : st.version);
   if (st.me) S.me = st.me;
   cacheState();
 }
@@ -402,6 +407,8 @@ function oweLine(netMine, o) {
 function viewHome() {
   const rows = allRows(), net = netFor(rows), o = other();
   const wrap = h('div');
+  if (serverOld()) wrap.append(h('div', { class: 'banner', style: 'background:#fff1d0;color:#6b4a00;display:block' },
+    h('b', {}, 'Server script is out of date. '), 'Part payments are switched off until you publish the latest script (Deploy → Manage deployments → pencil → New version → Deploy).'));
   if (!LIVE) wrap.append(h('div', { class: 'banner' }, h('span', {}, 'This is a demo with sample data.'),
     h('button', { onclick: () => { demo.reset(); boot(); toast('Demo data reset'); } }, 'Reset')));
   const open = orderedPots().filter(p => (net[p] || 0) !== 0);
@@ -589,8 +596,11 @@ function confirmSettle(potNames) {
     inp.addEventListener('input', () => {
       const v = L.toPence(inp.value);
       st.pence = v; st.ok = Number.isInteger(v) && v > 0 && v <= full;
+      const blocked = st.ok && v < full && serverOld();      // an out-of-date script would record the FULL amount
+      if (blocked) st.ok = false;
       note.className = 'm' + (st.ok ? '' : ' bad');
-      note.textContent = !st.ok ? (v > full ? 'That is more than the ' + money(full) + ' owed' : 'Enter an amount above zero')
+      note.textContent = blocked ? 'Update the server script first, or it would record the full ' + money(full)
+        : !st.ok ? (v > full ? 'That is more than the ' + money(full) + ' owed' : 'Enter an amount above zero')
         : v === full ? 'Full balance: settles to zero' : money(full - v) + ' will still be owed';
       goBtn.disabled = !all.every(x => x.st.ok);
       goBtn.textContent = all.some(x => x.st.ok && x.st.pence < x.full) ? 'Record payment' : 'Mark as paid';
@@ -661,7 +671,7 @@ async function boot() {
     if (!S.users.length) {            // show the last known data straight away while fresh data loads
       const c = store.get('su-cache');
       if (c && c.users && c.users.length) {
-        applyState(c); if (!S.me) S.me = S.users[0].email;
+        applyState(Object.assign({}, c, { cached: true })); if (!S.me) S.me = S.users[0].email;
         $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden'); render();
       }
     }
