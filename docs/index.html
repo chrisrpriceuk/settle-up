@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f766e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Settle Up">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Settle Up</title>
+<style>
+:root{
+  --bg:#f5f4f0; --card:#ffffff; --ink:#1c2524; --muted:#6b7775; --line:#e4e2dc;
+  --accent:#0f766e; --accent-ink:#ffffff; --accent-soft:#d9f0ec;
+  --pos:#0f766e; --neg:#b4472f; --warn:#8a5a00; --chip:#ecebe6;
+  --shadow:0 1px 2px rgba(20,30,28,.06),0 6px 20px rgba(20,30,28,.06);
+  --r:18px;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#101615; --card:#1a2220; --ink:#eaf1ef; --muted:#93a29f; --line:#2a3532;
+    --accent:#34b3a4; --accent-ink:#06211e; --accent-soft:#17352f; --pos:#4cc7b7; --neg:#ef8d74;
+    --warn:#e0b04a; --chip:#242e2c; --shadow:0 1px 2px rgba(0,0,0,.3),0 6px 20px rgba(0,0,0,.25);}
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+body{min-height:100vh;min-height:100dvh}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+#app{max-width:520px;margin:0 auto;min-height:100dvh;display:flex;flex-direction:column}
+header{display:flex;align-items:center;justify-content:space-between;padding:calc(env(safe-area-inset-top) + 14px) 18px 6px}
+header h1{font-size:20px;margin:0;letter-spacing:-.01em}
+.who{display:flex;align-items:center;gap:8px;background:var(--card);border:1px solid var(--line);border-radius:999px;padding:5px 12px 5px 6px;font-size:14px;box-shadow:var(--shadow)}
+.avatar{width:26px;height:26px;border-radius:50%;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;font-weight:700;font-size:13px}
+.sync{font-size:12px;color:var(--muted);padding:0 18px 4px;min-height:18px}
+.sync b{color:var(--warn);font-weight:600}
+main{flex:1;padding:6px 16px calc(96px + env(safe-area-inset-bottom))}
+.banner{background:var(--accent-soft);border-radius:12px;padding:10px 12px;font-size:13px;margin-bottom:14px;display:flex;gap:10px;justify-content:space-between;align-items:center}
+.banner button{background:none;border:0;color:var(--accent);font-weight:600;padding:0}
+.card{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);padding:16px 16px 14px;margin-bottom:14px}
+.pot-name{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.owe{font-size:26px;font-weight:700;letter-spacing:-.02em;margin:4px 0 2px}
+.owe.pos{color:var(--pos)} .owe.neg{color:var(--neg)} .owe.ok{color:var(--muted);font-weight:600}
+.sub{color:var(--muted);font-size:14px}
+.row{display:flex;gap:10px;align-items:center}
+.btn{border:0;border-radius:12px;padding:12px 16px;font-weight:600;background:var(--chip)}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.danger{background:transparent;color:var(--neg);border:1px solid var(--line)}
+.btn.block{width:100%}
+.btn:disabled{opacity:.5}
+.card .btn{margin-top:12px}
+h2{font-size:15px;margin:22px 4px 8px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+.list{background:var(--card);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.item{display:flex;justify-content:space-between;gap:12px;padding:13px 16px;border-bottom:1px solid var(--line);width:100%;text-align:left;background:none;border-left:0;border-right:0;border-top:0}
+.item:last-child{border-bottom:0}
+.item .t{font-weight:600;overflow-wrap:anywhere}
+.item .m{font-size:13px;color:var(--muted)}
+.item .r{text-align:right;white-space:nowrap}
+.item .amt{font-weight:600}
+.item .eff{font-size:13px}
+.eff.pos{color:var(--pos)} .eff.neg{color:var(--neg)} .eff.zero{color:var(--muted)}
+.item.void{opacity:.55} .item.void .t{text-decoration:line-through}
+.badge{display:inline-block;font-size:11px;font-weight:700;border-radius:6px;padding:1px 6px;background:var(--accent-soft);color:var(--accent);margin-left:6px;vertical-align:1px}
+.badge.warn{background:#fff1d0;color:var(--warn)}
+.empty{padding:26px 16px;text-align:center;color:var(--muted)}
+/* form */
+label.f{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:16px 2px 6px}
+.field{width:100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:13px 14px;font-size:17px}
+.field:focus{outline:2px solid var(--accent);outline-offset:1px}
+.amount{display:flex;align-items:center;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px 14px}
+.amount span{font-size:30px;font-weight:700;color:var(--muted);margin-right:6px}
+.amount input{border:0;background:none;font-size:34px;font-weight:700;width:100%;padding:6px 0;outline:none;letter-spacing:-.02em}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid transparent;background:var(--chip);border-radius:999px;padding:9px 15px;font-weight:600;font-size:15px}
+.chip[aria-pressed=true]{background:var(--accent);color:var(--accent-ink)}
+.seg{display:grid;grid-auto-flow:column;grid-auto-columns:1fr;background:var(--chip);border-radius:12px;padding:3px;gap:3px}
+.seg button{border:0;background:none;border-radius:10px;padding:10px;font-weight:600}
+.seg button[aria-pressed=true]{background:var(--card);box-shadow:var(--shadow)}
+.preview{margin-top:10px;font-size:15px;background:var(--accent-soft);border-radius:12px;padding:10px 12px}
+.err{color:var(--neg);font-size:14px;margin-top:10px;min-height:20px}
+.pct{width:84px;margin-left:8px;padding:9px 10px;font-size:15px;text-align:center}
+/* tabs */
+nav{position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--card) 92%,transparent);backdrop-filter:blur(12px);border-top:1px solid var(--line);padding:6px 10px calc(env(safe-area-inset-bottom) + 6px)}
+nav .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:4px;align-items:end}
+nav button{background:none;border:0;padding:8px 4px;border-radius:12px;color:var(--muted);font-size:12px;font-weight:600;display:flex;flex-direction:column;align-items:center;gap:2px}
+nav button svg{width:24px;height:24px}
+nav button[aria-current=page]{color:var(--accent)}
+nav .add svg{width:24px;height:24px}
+/* sheet */
+dialog{border:0;border-radius:22px 22px 0 0;padding:20px 18px calc(20px + env(safe-area-inset-bottom));width:100%;max-width:520px;margin:auto auto 0;background:var(--card);color:var(--ink);box-shadow:0 -10px 40px rgba(0,0,0,.25)}
+dialog::backdrop{background:rgba(10,16,15,.45)}
+dialog h3{margin:0 0 4px;font-size:20px}
+dl{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:14px 0;font-size:15px}
+dt{color:var(--muted)} dd{margin:0;text-align:right;overflow-wrap:anywhere}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom));background:#1c2524;color:#fff;border-radius:14px;padding:12px 16px;box-shadow:0 8px 30px rgba(0,0,0,.3);display:flex;gap:14px;align-items:center;max-width:92vw;z-index:50}
+.toast button{background:none;border:0;color:#7fe0d2;font-weight:700;padding:0}
+.toast.bad{background:#7a2a18}
+#signin{max-width:520px;margin:0 auto;padding:18vh 24px 24px;text-align:center}
+#signin h1{font-size:30px;margin:0 0 6px}
+#signin p{color:var(--muted)}
+#gbtn{display:flex;justify-content:center;margin-top:26px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<section id="signin" class="hidden">
+  <h1>Settle Up</h1>
+  <p>Sign in with your Google account to continue.</p>
+  <div id="gbtn"></div>
+  <p id="signinErr" class="err"></p>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>Settle Up</h1>
+    <button class="who" id="who" aria-label="Account"></button>
+  </header>
+  <div class="sync" id="sync"></div>
+  <main id="view"></main>
+  <nav><div class="in">
+    <button data-tab="home"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Balance</button>
+    <button data-tab="add" class="add"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/></svg>Add</button>
+    <button data-tab="history"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>History</button>
+  </div></nav>
+</div>
+<dialog id="sheet"></dialog>
+
+<script src="config.js" onerror="void 0"></script>
+<script src="ledger.js"></script>
+<script>
+(function () {
+'use strict';
+const L = window.Ledger;
+const CFG = window.SETTLE_CONFIG || null;
+const LIVE = !!(CFG && CFG.apiUrl && CFG.clientId);
+
+/* ───── tiny helpers ───── */
+function h(tag, props, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === false || v == null) continue;
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, '');
+    else e.setAttribute(k, v);
+  }
+  for (const kid of kids.flat(Infinity)) {
+    if (kid == null || kid === false) continue;
+    e.append(kid.nodeType ? kid : document.createTextNode(String(kid)));
+  }
+  return e;
+}
+const $ = (s) => document.querySelector(s);
+const uuid = () => (crypto.randomUUID ? crypto.randomUUID() :
+  'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
+const pad = (n) => String(n).padStart(2, '0');
+const isoDate = (d) => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const today = () => isoDate(new Date());
+function niceDate(s) {
+  const [y, m, d] = s.split('-').map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+const store = {
+  mem: {},
+  get(k) { try { const v = localStorage.getItem(k); return v == null ? null : JSON.parse(v); } catch (e) { return this.mem[k] == null ? null : this.mem[k]; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { this.mem[k] = v; } },
+  del(k) { try { localStorage.removeItem(k); } catch (e) {} delete this.mem[k]; },
+};
+
+/* ───── backends: same shape {ok, state?, error?, code?} ───── */
+const demo = {
+  KEY: 'settleup-demo-v1',
+  users: [{ name: 'Chris', email: 'chris@demo.local' }, { name: 'Natalie', email: 'natalie@demo.local' }],
+  data() {
+    let d = store.get(this.KEY);
+    if (!d) { d = this.seed(); store.set(this.KEY, d); }
+    return d;
+  },
+  seed() {
+    const [c, n] = this.users.map(u => u.email);
+    const day = (back) => { const d = new Date(); d.setDate(d.getDate() - back); return isoDate(d); };
+    const mk = (back, description, amt, paid_by, pct, pot) => ({
+      id: uuid(), created_at: new Date(Date.now() - back * 864e5).toISOString(), date: day(back), type: 'expense',
+      description, amount_pence: amt, paid_by, other_share_pct: pct, pot, status: 'active', created_by: paid_by,
+    });
+    return { pots: ['Main', 'Holiday'], rows: [
+      mk(12, 'Tesco food shop', 8923, n, 50, 'Main'),
+      mk(9, 'Modern Milkman', 1020, n, 50, 'Main'),
+      mk(7, 'Boiler service', 12000, c, 50, 'Main'),
+      mk(5, 'Flights to Lisbon', 42000, c, 50, 'Holiday'),
+      mk(3, 'Hotel deposit', 30000, n, 50, 'Holiday'),
+      mk(1, 'Birthday present for Mum', 3500, c, 100, 'Main'),
+    ] };
+  },
+  state() { const d = this.data(); return { users: this.users, currency: '£', pots: d.pots.slice(), rows: d.rows.slice() }; },
+  save(d) { store.set(this.KEY, d); },
+  async load() { return { ok: true, state: this.state() }; },
+  async add(entry) {
+    const d = this.data(); const err = L.validate(entry, this.users.map(u => u.email));
+    if (err) return { ok: false, code: 'invalid', error: err };
+    if (!d.rows.some(r => r.id === entry.id)) {
+      d.rows.push(Object.assign({ created_at: new Date().toISOString(), status: 'active', created_by: entry.paid_by }, entry));
+      if (d.pots.indexOf(entry.pot) < 0) d.pots.push(entry.pot);
+      this.save(d);
+    }
+    return { ok: true, state: this.state() };
+  },
+  async void(id, me) {
+    const d = this.data(); const r = d.rows.find(x => x.id === id);
+    if (!r) return { ok: false, code: 'not_found', error: 'Entry not found' };
+    r.status = 'void'; r.voided_by = me; this.save(d);
+    return { ok: true, state: this.state() };
+  },
+  async edit(id, entry, me) {
+    const err = L.validate(entry, this.users.map(u => u.email));
+    if (err) return { ok: false, code: 'invalid', error: err };
+    await this.void(id, me);
+    return this.add(Object.assign({}, entry, { replaces: id }));
+  },
+  async settle(expected, date, me) {
+    const d = this.data(); const [a, b] = this.users;
+    const net = L.balances(d.rows, a.email, b.email);
+    for (const p of Object.keys(expected)) if ((net[p] || 0) !== expected[p])
+      return { ok: false, code: 'conflict', error: 'Balances changed, please review and try again', state: this.state() };
+    const plan = L.settlementPlan(net, a, b, Object.keys(expected), date);
+    plan.forEach(p => d.rows.push(Object.assign({ id: uuid(), created_at: new Date().toISOString(), status: 'active', created_by: me }, p)));
+    this.save(d);
+    return { ok: true, state: this.state() };
+  },
+  async addPot(name) {
+    const d = this.data(); if (d.pots.indexOf(name) < 0) d.pots.push(name); this.save(d);
+    return { ok: true, pots: d.pots.slice() };
+  },
+  reset() { store.del(this.KEY); },
+};
+
+const remote = {
+  token: null,
+  async call(action, payload) {
+    let res;
+    try {
+      const r = await fetch(CFG.apiUrl, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(Object.assign({ action, token: this.token }, payload)) });
+      res = await r.json();
+    } catch (e) { return { ok: false, code: 'network', error: "Can't reach the server. Are you online?" }; }
+    if (!res.ok && res.code === 'auth') { this.token = null; store.del('su-token'); }
+    return res;
+  },
+  load() { return this.call('state'); },
+  add(entry) { return this.call('add', { entry }); },
+  void(id) { return this.call('void', { id }); },
+  edit(id, entry) { return this.call('edit', { id, entry }); },
+  settle(expected, date) { return this.call('settle', { expected, date }); },
+  addPot(name) { return this.call('addPot', { name }); },
+};
+const api = LIVE ? remote : demo;
+
+/* ───── app state ───── */
+let S = { users: [], me: null, currency: '£', pots: [], rows: [] };
+let tab = 'home';
+let histPot = 'All';
+let form = null;          // add/edit form state
+let busy = false;
+let pending = LIVE ? (store.get('su-pending') || []) : [];
+const savePending = () => store.set('su-pending', pending);
+
+const A = () => S.users[0], B = () => S.users[1];
+const meUser = () => S.users.find(u => u.email === S.me) || S.users[0];
+const other = () => S.users.find(u => u.email !== S.me);
+const userBy = (email) => S.users.find(u => u.email === email) || { name: email, email };
+const money = (p) => L.fmt(p, S.currency);
+
+function allRows() {
+  return S.rows.concat(pending.map(p => Object.assign({ status: 'active', created_at: new Date().toISOString(), created_by: S.me, _pending: true }, p)));
+}
+function netFor(rows) { return L.balances(rows, A().email, B().email); }
+/** my perspective: positive = they owe me */
+const mine = (net) => (S.me === A().email ? net : -net);
+
+function applyState(st) {
+  if (!st) return;
+  S.users = st.users; S.currency = st.currency || '£'; S.pots = st.pots; S.rows = st.rows;
+  if (st.me) S.me = st.me;
+}
+
+/* ───── ui feedback ───── */
+let toastTimer;
+function toast(msg, opts) {
+  opts = opts || {};
+  document.querySelectorAll('.toast').forEach(t => t.remove());
+  const t = h('div', { class: 'toast' + (opts.bad ? ' bad' : ''), role: 'status' }, h('span', {}, msg),
+    opts.action && h('button', { onclick: () => { t.remove(); opts.action.fn(); } }, opts.action.label));
+  document.body.append(t);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.remove(), opts.ms || 5000);
+}
+function sheet(content) {
+  const d = $('#sheet'); d.replaceChildren(content);
+  if (!d.open) d.showModal();
+}
+function closeSheet() { const d = $('#sheet'); if (d.open) d.close(); }
+$('#sheet').addEventListener('click', (e) => { if (e.target === $('#sheet')) closeSheet(); });
+
+async function run(fn, okMsg) {
+  if (busy) return null;
+  busy = true;
+  try {
+    const res = await fn();
+    if (res.state) applyState(res.state);
+    if (res.pots) S.pots = res.pots;
+    if (!res.ok && res.code === 'auth') { showSignin('Please sign in again.'); return res; }
+    if (!res.ok) toast(res.error || 'Something went wrong', { bad: true });
+    else if (okMsg) toast(okMsg);
+    return res;
+  } finally { busy = false; render(); }
+}
+
+/* ───── rendering ───── */
+function render() {
+  document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
+  const me = meUser();
+  const who = $('#who'); who.replaceChildren(h('span', { class: 'avatar' }, (me.name || '?')[0].toUpperCase()), me.name);
+  who.title = LIVE ? 'Sign out' : 'Switch person (demo)';
+  const sync = $('#sync');
+  sync.replaceChildren();
+  if (pending.length) sync.append(h('b', {}, pending.length + ' waiting to sync'));
+  else if (!LIVE) sync.append('Demo mode: nothing leaves this device');
+  const v = $('#view');
+  v.replaceChildren(tab === 'home' ? viewHome() : tab === 'add' ? viewAdd() : viewHistory());
+}
+
+function oweLine(netMine, o) {
+  if (netMine === 0) return { cls: 'ok', text: 'All settled up' };
+  return netMine > 0
+    ? { cls: 'pos', text: o.name + ' owes you ' + money(netMine) }
+    : { cls: 'neg', text: 'You owe ' + o.name + ' ' + money(-netMine) };
+}
+
+function viewHome() {
+  const rows = allRows(), net = netFor(rows), o = other();
+  const wrap = h('div');
+  if (!LIVE) wrap.append(h('div', { class: 'banner' }, h('span', {}, 'This is a demo with sample data.'),
+    h('button', { onclick: () => { demo.reset(); boot(); toast('Demo data reset'); } }, 'Reset')));
+  const open = S.pots.filter(p => (net[p] || 0) !== 0);
+  S.pots.forEach(pot => {
+    const n = mine(net[pot] || 0), line = oweLine(n, o);
+    wrap.append(h('div', { class: 'card' },
+      h('div', { class: 'pot-name' }, pot),
+      h('div', { class: 'owe ' + line.cls }, line.text),
+      n === 0 ? h('div', { class: 'sub' }, 'Nothing to pay') : h('div', { class: 'sub' }, n > 0 ? 'Waiting for ' + o.name + ' to pay you' : 'You need to pay ' + o.name),
+      n !== 0 && h('button', { class: 'btn primary block', onclick: () => confirmSettle([pot]) }, 'Settle up ' + pot)));
+  });
+  if (open.length > 1) wrap.append(h('button', { class: 'btn block', onclick: () => confirmSettle(open) }, 'Settle all pots together'));
+  wrap.append(h('h2', {}, 'Recent'));
+  wrap.append(entryList(rows.slice().sort(byNewest).slice(0, 5)));
+  return wrap;
+}
+
+const byNewest = (a, b) => (b.date + b.created_at).localeCompare(a.date + a.created_at);
+
+function effectFor(r) {
+  // from my point of view: + in my favour, - against me
+  const amt = r.type === 'settlement' ? r.amount_pence : L.share(r.amount_pence, r.other_share_pct);
+  if (amt === 0) return { cls: 'zero', text: 'no split' };
+  const paidByMe = r.paid_by === S.me;
+  if (r.type === 'settlement') return { cls: paidByMe ? 'pos' : 'neg', text: (paidByMe ? '' : '') + (paidByMe ? 'you paid ' : userBy(r.paid_by).name + ' paid ') + money(amt) };
+  return paidByMe ? { cls: 'pos', text: 'you’re owed ' + money(amt) } : { cls: 'neg', text: 'you owe ' + money(amt) };
+}
+
+function entryList(rows) {
+  if (!rows.length) return h('div', { class: 'list' }, h('div', { class: 'empty' }, 'Nothing here yet'));
+  return h('div', { class: 'list' }, rows.map(r => {
+    const e = effectFor(r), payer = r.paid_by === S.me ? 'You' : userBy(r.paid_by).name;
+    return h('button', { class: 'item' + (r.status === 'void' ? ' void' : ''), onclick: () => detail(r) },
+      h('div', {},
+        h('div', { class: 't' }, r.description || 'Settle up', r.type === 'settlement' && h('span', { class: 'badge' }, 'PAYMENT'), r._pending && h('span', { class: 'badge warn' }, 'PENDING')),
+        h('div', { class: 'm' }, niceDate(r.date) + ' · ' + r.pot + ' · ' + payer + ' paid')),
+      h('div', { class: 'r' }, h('div', { class: 'amt' }, money(r.amount_pence)),
+        r.status === 'void' ? h('div', { class: 'eff zero' }, 'voided') : h('div', { class: 'eff ' + e.cls }, e.text)));
+  }));
+}
+
+function viewHistory() {
+  const rows = allRows().filter(r => histPot === 'All' || r.pot === histPot).sort(byNewest);
+  return h('div', {},
+    h('div', { class: 'chips', style: 'margin:6px 0 14px' }, ['All'].concat(S.pots).map(p =>
+      h('button', { class: 'chip', 'aria-pressed': String(histPot === p), onclick: () => { histPot = p; render(); } }, p))),
+    entryList(rows));
+}
+
+/* ───── add / edit ───── */
+function newForm(pot) {
+  return { id: uuid(), amount: '', description: '', paid_by: S.me, pct: 50, customPct: false, pot: pot || S.pots[0], date: today(), editing: null, error: '' };
+}
+function viewAdd() {
+  if (!form) form = newForm();
+  const f = form, o = other();
+  const payerUser = userBy(f.paid_by), counter = S.users.find(u => u.email !== f.paid_by);
+  const previewEl = h('div', { class: 'preview' });
+  const errEl = h('div', { class: 'err' }, f.error);
+  const updatePreview = () => {
+    const p = L.toPence(f.amount);
+    if (!(p > 0)) { previewEl.textContent = 'Enter an amount to see the split'; return; }
+    const s = L.share(p, f.pct);
+    if (s === 0) { previewEl.textContent = 'No split: nobody owes anything for this one.'; return; }
+    previewEl.textContent = f.paid_by === S.me ? counter.name + ' owes you ' + money(s) : 'You owe ' + payerUser.name + ' ' + money(s);
+  };
+  const presets = [0, 25, 50, 60, 75, 100];
+  const shareLabel = (counter.email === S.me ? 'Your' : counter.name + '’s') + ' share of this';
+  const node = h('form', { onsubmit: (e) => { e.preventDefault(); submitForm(); }, novalidate: true },
+    f.editing && h('div', { class: 'banner' }, h('span', {}, 'Editing an entry. The original will be voided.'), h('button', { type: 'button', onclick: () => { form = null; tab = 'history'; render(); } }, 'Cancel')),
+    h('label', { class: 'f', for: 'amt' }, 'Amount'),
+    h('div', { class: 'amount' }, h('span', {}, S.currency),
+      h('input', { id: 'amt', inputmode: 'decimal', autocomplete: 'off', placeholder: '0.00', value: f.amount, enterkeyhint: 'next',
+        oninput: (e) => { f.amount = e.target.value; updatePreview(); } })),
+    h('label', { class: 'f', for: 'desc' }, 'What was it for?'),
+    h('input', { id: 'desc', class: 'field', autocomplete: 'off', maxlength: '200', placeholder: 'e.g. Tesco food shop', value: f.description, oninput: (e) => { f.description = e.target.value; } }),
+    h('label', { class: 'f' }, 'Paid by'),
+    h('div', { class: 'seg' }, S.users.map(u => h('button', { type: 'button', 'aria-pressed': String(f.paid_by === u.email),
+      onclick: () => { f.paid_by = u.email; viewReplace(); } }, u.email === S.me ? u.name + ' (you)' : u.name))),
+    h('label', { class: 'f' }, shareLabel),
+    h('div', { class: 'chips' },
+      presets.map(p => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(!f.customPct && f.pct === p),
+        onclick: () => { f.pct = p; f.customPct = false; viewReplace(); } }, p === 50 ? '50% even' : p + '%')),
+      h('span', { class: 'row' },
+        h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.customPct), onclick: () => { f.customPct = true; viewReplace(); setTimeout(() => $('#pct') && $('#pct').focus(), 0); } }, 'Custom'),
+        f.customPct && h('input', { id: 'pct', class: 'field pct', inputmode: 'decimal', value: String(f.pct), 'aria-label': 'Custom percentage',
+          oninput: (e) => { const n = parseFloat(e.target.value); f.pct = isFinite(n) ? Math.min(100, Math.max(0, n)) : 0; updatePreview(); } }))),
+    previewEl,
+    h('label', { class: 'f' }, 'Pot'),
+    h('div', { class: 'chips' }, S.pots.map(p => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.pot === p), onclick: () => { f.pot = p; viewReplace(); } }, p)),
+      h('button', { type: 'button', class: 'chip', onclick: newPotSheet }, '+ New pot')),
+    h('label', { class: 'f', for: 'date' }, 'Date'),
+    h('input', { id: 'date', class: 'field', type: 'date', value: f.date, max: today(), onchange: (e) => { f.date = e.target.value; } }),
+    errEl,
+    h('button', { class: 'btn primary block', type: 'submit', style: 'margin-top:8px;padding:15px' }, f.editing ? 'Save changes' : 'Add expense'));
+  updatePreview();
+  node._err = errEl;
+  return node;
+}
+function viewReplace() { $('#view').replaceChildren(viewAdd()); }
+
+function newPotSheet() {
+  const inp = h('input', { class: 'field', maxlength: '40', placeholder: 'e.g. Dog, Kids, House move', autocomplete: 'off' });
+  const go = async () => {
+    const name = inp.value.trim();
+    if (!name) return;
+    if (S.pots.some(p => p.toLowerCase() === name.toLowerCase())) { toast('That pot already exists', { bad: true }); return; }
+    closeSheet();
+    const res = await run(() => api.addPot(name));
+    if (res && res.ok) { form.pot = (res.pots || S.pots).find(p => p === name) || name; if (S.pots.indexOf(name) < 0) S.pots.push(name); render(); }
+  };
+  inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
+  sheet(h('div', {}, h('h3', {}, 'New pot'), h('p', { class: 'sub' }, 'Pots keep separate running balances, like a holiday or a project.'), inp,
+    h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), h('button', { class: 'btn primary', style: 'flex:1', onclick: go }, 'Create pot'))));
+  setTimeout(() => inp.focus(), 50);
+}
+
+async function submitForm() {
+  const f = form, setErr = (m) => { f.error = m; const e = $('#view .err'); if (e) e.textContent = m; };
+  const entry = {
+    id: f.id, type: 'expense', date: f.date, description: f.description.trim(), amount_pence: L.toPence(f.amount),
+    paid_by: f.paid_by, other_share_pct: f.pct, pot: f.pot,
+  };
+  const bad = L.validate(entry, S.users.map(u => u.email));
+  if (bad) { setErr(bad); return; }
+  if (new Date(entry.date + 'T12:00:00') > new Date(Date.now() + 864e5)) { setErr('That date is in the future'); return; }
+  setErr('');
+  const editing = f.editing;
+  let res;
+  if (editing) res = await run(() => api.edit(editing, entry, S.me));
+  else {
+    res = await run(() => api.add(entry, S.me));
+    if (res && !res.ok && res.code === 'network' && LIVE) {          // keep it safe on the device and retry later
+      pending.push(entry); savePending(); res = { ok: true, queued: true };
+      toast('Saved on this phone. It will sync when you’re back online.');
+    }
+  }
+  if (res && res.ok) {
+    const keepPot = f.pot;
+    form = newForm(keepPot);
+    if (editing) { tab = 'history'; toast('Changes saved'); render(); }
+    else if (!res.queued) toast(money(entry.amount_pence) + ' added', { action: { label: 'Undo', fn: () => run(() => api.void(entry.id, S.me), 'Undone') } });
+    render();
+  } else if (res && res.error) setErr(res.error);
+}
+
+/* ───── detail / void / edit ───── */
+function detail(r) {
+  const payer = r.paid_by === S.me ? 'You' : userBy(r.paid_by).name;
+  const e = effectFor(r);
+  const dd = (k, v) => [h('dt', {}, k), h('dd', {}, v)];
+  const actions = [];
+  if (r.status !== 'void' && !r._pending) {
+    if (r.type === 'expense') actions.push(h('button', { class: 'btn', style: 'flex:1', onclick: () => { closeSheet(); startEdit(r); } }, 'Edit'));
+    actions.push(h('button', { class: 'btn danger', style: 'flex:1', onclick: () => confirmVoid(r) }, 'Void'));
+  }
+  sheet(h('div', {},
+    h('h3', {}, r.description || 'Settle up'),
+    h('div', { class: 'sub' }, r.type === 'settlement' ? 'Payment between you' : 'Expense'),
+    h('dl', {}, dd('Amount', money(r.amount_pence)), dd('Paid by', payer), dd('Pot', r.pot), dd('Date', niceDate(r.date)),
+      r.type === 'expense' ? dd(userBy(S.users.find(u => u.email !== r.paid_by).email).name + '’s share', r.other_share_pct + '%') : [],
+      r.status === 'void' ? dd('Status', 'Voided' + (r.voided_by ? ' by ' + userBy(r.voided_by).name : '')) : dd('Effect', e.text),
+      r.created_by ? dd('Added by', userBy(r.created_by).name) : []),
+    h('div', { class: 'row' }, actions, h('button', { class: 'btn', style: 'flex:1', onclick: closeSheet }, 'Close'))));
+}
+function confirmVoid(r) {
+  sheet(h('div', {}, h('h3', {}, 'Void this entry?'),
+    h('p', { class: 'sub' }, 'It stays in the history, greyed out, but no longer counts towards the balance. ' + (r.type === 'settlement' ? 'The debt it cleared will come back.' : '')),
+    h('div', { class: 'row' }, h('button', { class: 'btn', style: 'flex:1', onclick: closeSheet }, 'Keep it'),
+      h('button', { class: 'btn primary', style: 'flex:1', onclick: async () => { closeSheet(); await run(() => api.void(r.id, S.me), 'Voided'); } }, 'Void'))));
+}
+function startEdit(r) {
+  form = { id: uuid(), amount: (r.amount_pence / 100).toFixed(2), description: r.description, paid_by: r.paid_by, pct: r.other_share_pct,
+    customPct: [0, 25, 50, 60, 75, 100].indexOf(r.other_share_pct) < 0, pot: r.pot, date: r.date, editing: r.id, error: '' };
+  tab = 'add'; render();
+}
+
+/* ───── settle up ───── */
+function confirmSettle(pots) {
+  const rows = allRows(), net = netFor(rows);
+  const expected = {}; pots.forEach(p => { expected[p] = net[p] || 0; });
+  const plan = L.settlementPlan(net, A(), B(), pots, today());
+  if (!plan.length) { toast('Already settled'); return; }
+  if (pending.length) { toast('Wait for pending entries to sync first', { bad: true }); return; }
+  const lines = plan.map(p => {
+    const payer = userBy(p.paid_by), payee = S.users.find(u => u.email !== p.paid_by);
+    return h('div', { class: 'item', style: 'padding-left:0;padding-right:0' },
+      h('div', {}, h('div', { class: 't' }, (payer.email === S.me ? 'You pay ' : payer.name + ' pays ') + (payee.email === S.me ? 'you' : payee.name)), h('div', { class: 'm' }, p.pot)),
+      h('div', { class: 'r amt' }, money(p.amount_pence)));
+  });
+  sheet(h('div', {}, h('h3', {}, 'Settle up'),
+    h('p', { class: 'sub' }, 'This records that the transfer has been made, and brings the balance back to zero. Make the bank transfer first.'),
+    h('div', {}, lines),
+    h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn', onclick: closeSheet }, 'Not yet'),
+      h('button', { class: 'btn primary', style: 'flex:1', onclick: async () => {
+        closeSheet();
+        const res = await run(() => api.settle(expected, today()));
+        if (res && res.ok) toast('Settled up ✓');
+        else if (res && res.code === 'conflict') setTimeout(() => confirmSettle(pots.filter(p => (netFor(allRows())[p] || 0) !== 0)), 300);
+      } }, 'Mark as paid'))));
+}
+
+/* ───── navigation, auth, boot ───── */
+document.querySelectorAll('nav button').forEach(b => b.addEventListener('click', () => {
+  tab = b.dataset.tab;
+  if (tab === 'add' && form && form.editing) form = null;
+  render();
+  if (tab === 'add') setTimeout(() => { const a = $('#amt'); if (a && !a.value) a.focus(); }, 30);
+}));
+$('#who').addEventListener('click', () => {
+  if (LIVE) {
+    sheet(h('div', {}, h('h3', {}, meUser().name), h('p', { class: 'sub' }, S.me),
+      h('div', { class: 'row' }, h('button', { class: 'btn', style: 'flex:1', onclick: closeSheet }, 'Close'),
+        h('button', { class: 'btn danger', style: 'flex:1', onclick: () => { closeSheet(); store.del('su-token'); remote.token = null; if (window.google) google.accounts.id.disableAutoSelect(); showSignin(''); } }, 'Sign out'))));
+  } else { S.me = other().email; form = null; render(); toast('Now viewing as ' + meUser().name); }
+});
+
+function jwtExp(t) { try { return JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).exp * 1000; } catch (e) { return 0; } }
+let gisReady = null;
+function loadGis() {
+  if (gisReady) return gisReady;
+  gisReady = new Promise((resolve) => {
+    const s = document.createElement('script'); s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+    s.onload = () => { google.accounts.id.initialize({ client_id: CFG.clientId, callback: (r) => { remote.token = r.credential; store.set('su-token', r.credential); boot(); }, auto_select: true, cancel_on_tap_outside: false }); resolve(true); };
+    s.onerror = () => resolve(false);
+    document.head.append(s);
+  });
+  return gisReady;
+}
+async function showSignin(msg) {
+  $('#app').classList.add('hidden'); $('#signin').classList.remove('hidden');
+  $('#signinErr').textContent = msg || '';
+  const ok = await loadGis();
+  if (!ok) { $('#signinErr').textContent = 'Could not load Google sign-in. Check your connection.'; return; }
+  const g = $('#gbtn'); g.replaceChildren();
+  google.accounts.id.renderButton(g, { theme: 'outline', size: 'large', text: 'signin_with', shape: 'pill' });
+  if (msg !== '') google.accounts.id.prompt();
+}
+
+async function flushPending() {
+  if (!LIVE || !pending.length) return;
+  while (pending.length) {
+    const res = await remote.add(pending[0]);
+    if (res.ok) { pending.shift(); savePending(); if (res.state) applyState(res.state); }
+    else if (res.code === 'network' || res.code === 'auth') break;
+    else { const bad = pending.shift(); savePending(); toast('Dropped an entry: ' + res.error + ' (' + (bad.description || '') + ')', { bad: true }); }
+  }
+  render();
+}
+
+async function boot() {
+  if (LIVE) {
+    if (!remote.token) { const t = store.get('su-token'); if (t && jwtExp(t) > Date.now() + 30000) remote.token = t; }
+    if (!remote.token) return showSignin();
+  }
+  const res = await api.load();
+  if (!res.ok) {
+    if (res.code === 'auth') return showSignin('Please sign in.');
+    if (res.code === 'forbidden') { store.del('su-token'); remote.token = null; return showSignin('This Google account is not allowed.'); }
+    $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden');
+    $('#view').replaceChildren(h('div', { class: 'card' }, h('div', { class: 'owe neg' }, 'Can’t load'), h('p', { class: 'sub' }, res.error || 'Unknown error'),
+      h('button', { class: 'btn primary', onclick: boot }, 'Try again')));
+    return;
+  }
+  applyState(res.state);
+  if (!S.me) S.me = S.users[0].email;
+  $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden');
+  if (!S.pots.length) S.pots = ['Main'];
+  if (form && S.pots.indexOf(form.pot) < 0) form.pot = S.pots[0];
+  render();
+  flushPending();
+}
+
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy && $('#sheet').open === false && tab !== 'add') boot(); });
+window.addEventListener('online', flushPending);
+if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
+boot();
+})();
+</script>
+</body>
+</html>
