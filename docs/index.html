@@ -353,8 +353,16 @@ function toast(msg, opts) {
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.remove(), opts.ms || 5000);
 }
-function sheet(content) {
+/** Opens the bottom sheet. By default nothing in it is focused, so the phone keyboard only appears when a field is tapped.
+ *  (A modal dialog otherwise focuses its first input.) Pass {keepFocus:true} to let the first input take focus. */
+function sheet(content, opts) {
   const d = $('#sheet'); d.replaceChildren(content);
+  if (!(opts && opts.keepFocus)) {
+    const title = content.querySelector('h3');
+    if (title && !content.querySelector('[autofocus]')) {
+      title.setAttribute('tabindex', '-1'); title.setAttribute('autofocus', ''); title.style.outline = 'none';
+    }
+  }
   if (!d.open) d.showModal();
 }
 function closeSheet() { const d = $('#sheet'); if (d.open) d.close(); }
@@ -498,7 +506,7 @@ function newPotSheet() {
   };
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
   sheet(h('div', {}, h('h3', {}, 'New pot'), h('p', { class: 'sub' }, 'Pots keep separate running balances, like a holiday or a project.'), inp,
-    h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), h('button', { class: 'btn primary', style: 'flex:1', onclick: go }, 'Create pot'))));
+    h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn', onclick: closeSheet }, 'Cancel'), h('button', { class: 'btn primary', style: 'flex:1', onclick: go }, 'Create pot'))), { keepFocus: true });
   setTimeout(() => inp.focus(), 50);
 }
 

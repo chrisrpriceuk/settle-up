@@ -186,7 +186,20 @@ async def main(root):
         await pg.click('nav [data-tab=history]')
         chips = [s.strip().lower() for s in await pg.locator('.chip').all_inner_texts()]
         check('History filter uses the same order', chips == ['all', 'main', 'holiday', 'zoo', 'alpha'], chips)
+        # keyboard behaviour: opening the confirmation must not focus the amount box; tapping it must
+        await pg.click('nav [data-tab=home]')
+        await pg.click('text=Settle up Zoo'); await pg.wait_for_selector('dialog[open]')
+        active = await pg.evaluate("document.activeElement && document.activeElement.tagName")
+        check('settle confirmation does not auto-focus the amount field (no keyboard)', active not in ('INPUT', 'TEXTAREA'), active)
+        await pg.locator('dialog input').click()
+        check('tapping the amount field focuses it', await pg.evaluate("document.activeElement.tagName") == 'INPUT')
+        check('tapping selects the figure so typing replaces it', await pg.evaluate("document.activeElement.selectionStart===0 && document.activeElement.selectionEnd===document.activeElement.value.length"))
+        await pg.keyboard.press('Escape')
         await pg.click('nav [data-tab=add]')
+        await pg.click('text=+ New pot'); await pg.wait_for_selector('dialog[open]')
+        await pg.wait_for_timeout(150)
+        check('new-pot sheet DOES focus its field (you are about to type)', await pg.evaluate("document.activeElement.tagName") == 'INPUT')
+        await pg.keyboard.press('Escape')
         chips = [s.strip().lower() for s in await pg.locator('label:has-text("Pot") + .chips .chip').all_inner_texts()]
         check('Add form pot chips use the same order', chips[:4] == ['main', 'holiday', 'zoo', 'alpha'], chips)
         check('no JS errors', not errs, errs)
