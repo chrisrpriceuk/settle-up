@@ -197,9 +197,9 @@ async def main(root):
         S.rows.append(dict(id='z1', type='expense', date='2026-11-09', description='Zoo trip', amount_pence=4000, paid_by=A, other_share_pct=50, pot='Zoo', status='active', created_by=A, created_at='now', group_id=''))
         S.rows.append(dict(id='h1', type='expense', date='2026-11-09', description='Hotel', amount_pence=2000, paid_by=B, other_share_pct=50, pot='Holiday', status='active', created_by=B, created_at='now', group_id=''))
         await pg.reload(); await pg.wait_for_selector('.card')
-        await pg.wait_for_function("document.querySelectorAll('.pot-name').length>=4", timeout=8000)
+        await pg.wait_for_function("document.querySelectorAll('.pot-name').length>=3", timeout=8000)
         order = [s.strip().lower() for s in await pg.locator('.pot-name').all_inner_texts()]
-        check('Home order: Main (settled) first, then balances A-Z, then settled A-Z', order == ['main', 'holiday', 'zoo', 'alpha'], order)
+        check('Home: Main (settled) first, then pots with a balance A-Z; other settled pots hidden', order == ['main', 'holiday', 'zoo'], order)
         await pg.click('nav [data-tab=history]')
         chips = [s.strip().lower() for s in await pg.locator('.chip').all_inner_texts()]
         check('History filter uses the same order', chips == ['all', 'main', 'holiday', 'zoo', 'alpha'], chips)

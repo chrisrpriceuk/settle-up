@@ -412,7 +412,7 @@ function viewHome() {
   if (!LIVE) wrap.append(h('div', { class: 'banner' }, h('span', {}, 'This is a demo with sample data.'),
     h('button', { onclick: () => { demo.reset(); boot(); toast('Demo data reset'); } }, 'Reset')));
   const open = orderedPots().filter(p => (net[p] || 0) !== 0);
-  orderedPots().forEach(pot => {
+  orderedPots().filter(p => String(p).toLowerCase() === 'main' || (net[p] || 0) !== 0).forEach(pot => {
     const n = mine(net[pot] || 0), line = oweLine(n, o);
     wrap.append(h('div', { class: 'card' },
       h('div', { class: 'pot-name' }, pot),
