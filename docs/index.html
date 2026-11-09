@@ -198,41 +198,22 @@ const demo = {
   state() { const d = this.data(); return { users: this.users, currency: '£', pots: d.pots.slice(), rows: d.rows.slice() }; },
   save(d) { store.set(this.KEY, d); },
   async load() { return { ok: true, state: this.state() }; },
-  async add(entry) {
-    const d = this.data(); const err = L.validate(entry, this.users.map(u => u.email));
-    if (err) return { ok: false, code: 'invalid', error: err };
-    if (!d.rows.some(r => r.id === entry.id)) {
-      d.rows.push(Object.assign({ created_at: new Date().toISOString(), status: 'active', created_by: entry.paid_by }, entry));
-      if (d.pots.indexOf(entry.pot) < 0) d.pots.push(entry.pot);
-      this.save(d);
+  async send(op) {
+    const d = this.data(), emails = this.users.map(u => u.email);
+    if (op.k === 'add' || op.k === 'edit') {
+      const err = L.validate(op.entry, emails);
+      if (err) return { ok: false, code: 'invalid', error: err };
     }
-    return { ok: true, state: this.state() };
-  },
-  async void(id, me) {
-    const d = this.data(); const r = d.rows.find(x => x.id === id);
-    if (!r) return { ok: false, code: 'not_found', error: 'Entry not found' };
-    r.status = 'void'; r.voided_by = me; this.save(d);
-    return { ok: true, state: this.state() };
-  },
-  async edit(id, entry, me) {
-    const err = L.validate(entry, this.users.map(u => u.email));
-    if (err) return { ok: false, code: 'invalid', error: err };
-    await this.void(id, me);
-    return this.add(Object.assign({}, entry, { replaces: id }));
-  },
-  async settle(expected, date, me) {
-    const d = this.data(); const [a, b] = this.users;
-    const net = L.balances(d.rows, a.email, b.email);
-    for (const p of Object.keys(expected)) if ((net[p] || 0) !== expected[p])
-      return { ok: false, code: 'conflict', error: 'Balances changed, please review and try again', state: this.state() };
-    const plan = L.settlementPlan(net, a, b, Object.keys(expected), date);
-    plan.forEach(p => d.rows.push(Object.assign({ id: uuid(), created_at: new Date().toISOString(), status: 'active', created_by: me }, p)));
+    if (op.k === 'settle') {
+      if (d.rows.some(r => r.group_id === op.group)) return { ok: true };
+      const net = L.balances(d.rows, emails[0], emails[1]);
+      for (const p of Object.keys(op.expected)) if ((net[p] || 0) !== op.expected[p])
+        return { ok: false, code: 'conflict', error: 'Balances changed, please review and try again', state: this.state() };
+    }
+    d.rows = L.applyOp(d.rows, op);
+    L.opPots(op).forEach(n => { if (d.pots.indexOf(n) < 0) d.pots.push(n); });
     this.save(d);
-    return { ok: true, state: this.state() };
-  },
-  async addPot(name) {
-    const d = this.data(); if (d.pots.indexOf(name) < 0) d.pots.push(name); this.save(d);
-    return { ok: true, pots: d.pots.slice() };
+    return { ok: true };
   },
   reset() { store.del(this.KEY); },
 };
@@ -250,11 +231,17 @@ const remote = {
     return res;
   },
   load() { return this.call('state'); },
-  add(entry) { return this.call('add', { entry }); },
-  void(id) { return this.call('void', { id }); },
-  edit(id, entry) { return this.call('edit', { id, entry }); },
-  settle(expected, date) { return this.call('settle', { expected, date }); },
-  addPot(name) { return this.call('addPot', { name }); },
+  send(op) {
+    switch (op.k) {
+      case 'add': return this.call('add', { entry: op.entry });
+      case 'void': return this.call('void', { id: op.id });
+      case 'edit': return this.call('edit', { id: op.id, entry: op.entry });
+      case 'settle': return this.call('settle', { expected: op.expected, date: op.date, group: op.group,
+        ids: Object.fromEntries(op.plan.map(p => [p.pot, p.id])) });
+      case 'pot': return this.call('addPot', { name: op.name });
+    }
+    return Promise.resolve({ ok: false, code: 'bad_request', error: 'Unknown change' });
+  },
 };
 const api = LIVE ? remote : demo;
 
@@ -263,9 +250,12 @@ let S = { users: [], me: null, currency: '£', pots: [], rows: [] };
 let tab = 'home';
 let histPot = 'All';
 let form = null;          // add/edit form state
-let busy = false;
-let pending = LIVE ? (store.get('su-pending') || []) : [];
-const savePending = () => store.set('su-pending', pending);
+// Changes are applied on screen at once and queued here; a background loop sends them in order.
+// Each op carries client-made IDs, so a retry can never double-add.
+let outbox = store.get('su-outbox') || [];
+let flushing = false;
+let commitSeq = 0;
+const saveOutbox = () => store.set('su-outbox', outbox);
 
 const A = () => S.users[0], B = () => S.users[1];
 const meUser = () => S.users.find(u => u.email === S.me) || S.users[0];
@@ -273,17 +263,65 @@ const other = () => S.users.find(u => u.email !== S.me);
 const userBy = (email) => S.users.find(u => u.email === email) || { name: email, email };
 const money = (p) => L.fmt(p, S.currency);
 
+/** What the screen shows: the last known server state plus changes still waiting to be saved. */
 function allRows() {
-  return S.rows.concat(pending.map(p => Object.assign({ status: 'active', created_at: new Date().toISOString(), created_by: S.me, _pending: true }, p)));
+  let rows = S.rows;
+  for (const op of outbox) {
+    const before = rows;
+    rows = L.applyOp(rows, op);
+    if (op.stuck) rows = rows.map(r => (before.indexOf(r) < 0 ? Object.assign({}, r, { _pending: true }) : r));
+  }
+  return rows;
+}
+function pots() {
+  const out = S.pots.slice();
+  outbox.forEach(op => L.opPots(op).forEach(n => { if (out.indexOf(n) < 0) out.push(n); }));
+  return out;
 }
 function netFor(rows) { return L.balances(rows, A().email, B().email); }
 /** my perspective: positive = they owe me */
 const mine = (net) => (S.me === A().email ? net : -net);
 
+function cacheState() {
+  if (LIVE) store.set('su-cache', { users: S.users, me: S.me, currency: S.currency, pots: S.pots, rows: S.rows });
+}
 function applyState(st) {
   if (!st) return;
   S.users = st.users; S.currency = st.currency || '£'; S.pots = st.pots; S.rows = st.rows;
   if (st.me) S.me = st.me;
+  cacheState();
+}
+/** The server accepted this op: fold it into the known state. */
+function commit(op) {
+  S.rows = L.applyOp(S.rows, op);
+  L.opPots(op).forEach(n => { if (S.pots.indexOf(n) < 0) S.pots.push(n); });
+  commitSeq++; cacheState();
+}
+function queueOp(op) {
+  op.by = S.me;
+  outbox.push(op); saveOutbox();
+  render();      // instant
+  flush();       // saved in the background
+}
+async function flush() {
+  if (flushing) return;
+  flushing = true;
+  outbox.forEach(o => { o.stuck = false; });
+  try {
+    while (outbox.length) {
+      const op = outbox[0];
+      const res = await api.send(op);
+      if (res.ok) { commit(op); outbox.shift(); saveOutbox(); render(); }
+      else if (res.code === 'network') { outbox.forEach(o => { o.stuck = true; }); saveOutbox(); break; }
+      else if (res.code === 'auth') { showSignin('Please sign in again.'); break; }
+      else {                                   // the server refused this one: drop it, show the truth
+        outbox.shift(); saveOutbox();
+        if (res.state) applyState(res.state);
+        toast(res.error || 'That change could not be saved', { bad: true });
+        render();
+      }
+    }
+  } finally { flushing = false; render(); }
 }
 
 /* ───── ui feedback ───── */
@@ -304,20 +342,6 @@ function sheet(content) {
 function closeSheet() { const d = $('#sheet'); if (d.open) d.close(); }
 $('#sheet').addEventListener('click', (e) => { if (e.target === $('#sheet')) closeSheet(); });
 
-async function run(fn, okMsg) {
-  if (busy) return null;
-  busy = true;
-  try {
-    const res = await fn();
-    if (res.state) applyState(res.state);
-    if (res.pots) S.pots = res.pots;
-    if (!res.ok && res.code === 'auth') { showSignin('Please sign in again.'); return res; }
-    if (!res.ok) toast(res.error || 'Something went wrong', { bad: true });
-    else if (okMsg) toast(okMsg);
-    return res;
-  } finally { busy = false; render(); }
-}
-
 /* ───── rendering ───── */
 function render() {
   document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
@@ -326,7 +350,8 @@ function render() {
   who.title = LIVE ? 'Sign out' : 'Switch person (demo)';
   const sync = $('#sync');
   sync.replaceChildren();
-  if (pending.length) sync.append(h('b', {}, pending.length + ' waiting to sync'));
+  if (outbox.some(o => o.stuck)) sync.append(h('b', {}, outbox.length + ' waiting to sync'));
+  else if (outbox.length) sync.append('Saving…');
   else if (!LIVE) sync.append('Demo mode: nothing leaves this device');
   const v = $('#view');
   v.replaceChildren(tab === 'home' ? viewHome() : tab === 'add' ? viewAdd() : viewHistory());
@@ -344,8 +369,8 @@ function viewHome() {
   const wrap = h('div');
   if (!LIVE) wrap.append(h('div', { class: 'banner' }, h('span', {}, 'This is a demo with sample data.'),
     h('button', { onclick: () => { demo.reset(); boot(); toast('Demo data reset'); } }, 'Reset')));
-  const open = S.pots.filter(p => (net[p] || 0) !== 0);
-  S.pots.forEach(pot => {
+  const open = pots().filter(p => (net[p] || 0) !== 0);
+  pots().forEach(pot => {
     const n = mine(net[pot] || 0), line = oweLine(n, o);
     wrap.append(h('div', { class: 'card' },
       h('div', { class: 'pot-name' }, pot),
@@ -386,14 +411,14 @@ function entryList(rows) {
 function viewHistory() {
   const rows = allRows().filter(r => histPot === 'All' || r.pot === histPot).sort(byNewest);
   return h('div', {},
-    h('div', { class: 'chips', style: 'margin:6px 0 14px' }, ['All'].concat(S.pots).map(p =>
+    h('div', { class: 'chips', style: 'margin:6px 0 14px' }, ['All'].concat(pots()).map(p =>
       h('button', { class: 'chip', 'aria-pressed': String(histPot === p), onclick: () => { histPot = p; render(); } }, p))),
     entryList(rows));
 }
 
 /* ───── add / edit ───── */
 function newForm(pot) {
-  return { id: uuid(), amount: '', description: '', paid_by: S.me, pct: 50, customPct: false, pot: pot || S.pots[0], date: today(), editing: null, error: '' };
+  return { id: uuid(), amount: '', description: '', paid_by: S.me, pct: 50, customPct: false, pot: pot || pots()[0], date: today(), editing: null, error: '' };
 }
 function viewAdd() {
   if (!form) form = newForm();
@@ -431,7 +456,7 @@ function viewAdd() {
           oninput: (e) => { const n = parseFloat(e.target.value); f.pct = isFinite(n) ? Math.min(100, Math.max(0, n)) : 0; updatePreview(); } }))),
     previewEl,
     h('label', { class: 'f' }, 'Pot'),
-    h('div', { class: 'chips' }, S.pots.map(p => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.pot === p), onclick: () => { f.pot = p; viewReplace(); } }, p)),
+    h('div', { class: 'chips' }, pots().map(p => h('button', { type: 'button', class: 'chip', 'aria-pressed': String(f.pot === p), onclick: () => { f.pot = p; viewReplace(); } }, p)),
       h('button', { type: 'button', class: 'chip', onclick: newPotSheet }, '+ New pot')),
     h('label', { class: 'f', for: 'date' }, 'Date'),
     h('input', { id: 'date', class: 'field', type: 'date', value: f.date, max: today(), onchange: (e) => { f.date = e.target.value; } }),
@@ -445,13 +470,13 @@ function viewReplace() { $('#view').replaceChildren(viewAdd()); }
 
 function newPotSheet() {
   const inp = h('input', { class: 'field', maxlength: '40', placeholder: 'e.g. Dog, Kids, House move', autocomplete: 'off' });
-  const go = async () => {
+  const go = () => {
     const name = inp.value.trim();
     if (!name) return;
-    if (S.pots.some(p => p.toLowerCase() === name.toLowerCase())) { toast('That pot already exists', { bad: true }); return; }
+    if (pots().some(p => p.toLowerCase() === name.toLowerCase())) { toast('That pot already exists', { bad: true }); return; }
     closeSheet();
-    const res = await run(() => api.addPot(name));
-    if (res && res.ok) { form.pot = (res.pots || S.pots).find(p => p === name) || name; if (S.pots.indexOf(name) < 0) S.pots.push(name); render(); }
+    form.pot = name;
+    queueOp({ k: 'pot', name });
   };
   inp.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } });
   sheet(h('div', {}, h('h3', {}, 'New pot'), h('p', { class: 'sub' }, 'Pots keep separate running balances, like a holiday or a project.'), inp,
@@ -459,7 +484,7 @@ function newPotSheet() {
   setTimeout(() => inp.focus(), 50);
 }
 
-async function submitForm() {
+function submitForm() {
   const f = form, setErr = (m) => { f.error = m; const e = $('#view .err'); if (e) e.textContent = m; };
   const entry = {
     id: f.id, type: 'expense', date: f.date, description: f.description.trim(), amount_pence: L.toPence(f.amount),
@@ -470,22 +495,15 @@ async function submitForm() {
   if (new Date(entry.date + 'T12:00:00') > new Date(Date.now() + 864e5)) { setErr('That date is in the future'); return; }
   setErr('');
   const editing = f.editing;
-  let res;
-  if (editing) res = await run(() => api.edit(editing, entry, S.me));
-  else {
-    res = await run(() => api.add(entry, S.me));
-    if (res && !res.ok && res.code === 'network' && LIVE) {          // keep it safe on the device and retry later
-      pending.push(entry); savePending(); res = { ok: true, queued: true };
-      toast('Saved on this phone. It will sync when you’re back online.');
-    }
+  form = newForm(f.pot);
+  if (editing) {
+    tab = 'history';
+    queueOp({ k: 'edit', id: editing, entry: Object.assign({}, entry, { replaces: editing }) });
+    toast('Changes saved');
+  } else {
+    queueOp({ k: 'add', entry });
+    toast(money(entry.amount_pence) + ' added', { action: { label: 'Undo', fn: () => queueOp({ k: 'void', id: entry.id }) } });
   }
-  if (res && res.ok) {
-    const keepPot = f.pot;
-    form = newForm(keepPot);
-    if (editing) { tab = 'history'; toast('Changes saved'); render(); }
-    else if (!res.queued) toast(money(entry.amount_pence) + ' added', { action: { label: 'Undo', fn: () => run(() => api.void(entry.id, S.me), 'Undone') } });
-    render();
-  } else if (res && res.error) setErr(res.error);
 }
 
 /* ───── detail / void / edit ───── */
@@ -511,7 +529,7 @@ function confirmVoid(r) {
   sheet(h('div', {}, h('h3', {}, 'Void this entry?'),
     h('p', { class: 'sub' }, 'It stays in the history, greyed out, but no longer counts towards the balance. ' + (r.type === 'settlement' ? 'The debt it cleared will come back.' : '')),
     h('div', { class: 'row' }, h('button', { class: 'btn', style: 'flex:1', onclick: closeSheet }, 'Keep it'),
-      h('button', { class: 'btn primary', style: 'flex:1', onclick: async () => { closeSheet(); await run(() => api.void(r.id, S.me), 'Voided'); } }, 'Void'))));
+      h('button', { class: 'btn primary', style: 'flex:1', onclick: () => { closeSheet(); queueOp({ k: 'void', id: r.id }); toast('Voided'); } }, 'Void'))));
 }
 function startEdit(r) {
   form = { id: uuid(), amount: (r.amount_pence / 100).toFixed(2), description: r.description, paid_by: r.paid_by, pct: r.other_share_pct,
@@ -520,12 +538,11 @@ function startEdit(r) {
 }
 
 /* ───── settle up ───── */
-function confirmSettle(pots) {
+function confirmSettle(potNames) {
   const rows = allRows(), net = netFor(rows);
-  const expected = {}; pots.forEach(p => { expected[p] = net[p] || 0; });
-  const plan = L.settlementPlan(net, A(), B(), pots, today());
+  const expected = {}; potNames.forEach(p => { expected[p] = net[p] || 0; });
+  const plan = L.settlementPlan(net, A(), B(), potNames, today());
   if (!plan.length) { toast('Already settled'); return; }
-  if (pending.length) { toast('Wait for pending entries to sync first', { bad: true }); return; }
   const lines = plan.map(p => {
     const payer = userBy(p.paid_by), payee = S.users.find(u => u.email !== p.paid_by);
     return h('div', { class: 'item', style: 'padding-left:0;padding-right:0' },
@@ -536,11 +553,12 @@ function confirmSettle(pots) {
     h('p', { class: 'sub' }, 'This records that the transfer has been made, and brings the balance back to zero. Make the bank transfer first.'),
     h('div', {}, lines),
     h('div', { class: 'row', style: 'margin-top:14px' }, h('button', { class: 'btn', onclick: closeSheet }, 'Not yet'),
-      h('button', { class: 'btn primary', style: 'flex:1', onclick: async () => {
+      h('button', { class: 'btn primary', style: 'flex:1', onclick: () => {
         closeSheet();
-        const res = await run(() => api.settle(expected, today()));
-        if (res && res.ok) toast('Settled up ✓');
-        else if (res && res.code === 'conflict') setTimeout(() => confirmSettle(pots.filter(p => (netFor(allRows())[p] || 0) !== 0)), 300);
+        const group = uuid();
+        plan.forEach(p => { p.id = uuid(); p.group_id = group; });
+        queueOp({ k: 'settle', group, plan, expected, date: today() });
+        toast('Settled up ✓');
       } }, 'Mark as paid'))));
 }
 
@@ -555,7 +573,7 @@ $('#who').addEventListener('click', () => {
   if (LIVE) {
     sheet(h('div', {}, h('h3', {}, meUser().name), h('p', { class: 'sub' }, S.me),
       h('div', { class: 'row' }, h('button', { class: 'btn', style: 'flex:1', onclick: closeSheet }, 'Close'),
-        h('button', { class: 'btn danger', style: 'flex:1', onclick: () => { closeSheet(); store.del('su-token'); remote.token = null; if (window.google) google.accounts.id.disableAutoSelect(); showSignin(''); } }, 'Sign out'))));
+        h('button', { class: 'btn danger', style: 'flex:1', onclick: () => { closeSheet(); store.del('su-token'); store.del('su-cache'); remote.token = null; if (window.google) google.accounts.id.disableAutoSelect(); showSignin(''); } }, 'Sign out'))));
   } else { S.me = other().email; form = null; render(); toast('Now viewing as ' + meUser().name); }
 });
 
@@ -581,42 +599,40 @@ async function showSignin(msg) {
   if (msg !== '') google.accounts.id.prompt();
 }
 
-async function flushPending() {
-  if (!LIVE || !pending.length) return;
-  while (pending.length) {
-    const res = await remote.add(pending[0]);
-    if (res.ok) { pending.shift(); savePending(); if (res.state) applyState(res.state); }
-    else if (res.code === 'network' || res.code === 'auth') break;
-    else { const bad = pending.shift(); savePending(); toast('Dropped an entry: ' + res.error + ' (' + (bad.description || '') + ')', { bad: true }); }
-  }
-  render();
-}
-
 async function boot() {
   if (LIVE) {
     if (!remote.token) { const t = store.get('su-token'); if (t && jwtExp(t) > Date.now() + 30000) remote.token = t; }
     if (!remote.token) return showSignin();
+    if (!S.users.length) {            // show the last known data straight away while fresh data loads
+      const c = store.get('su-cache');
+      if (c && c.users && c.users.length) {
+        applyState(c); if (!S.me) S.me = S.users[0].email;
+        $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden'); render();
+      }
+    }
   }
+  const seq = commitSeq;
   const res = await api.load();
   if (!res.ok) {
     if (res.code === 'auth') return showSignin('Please sign in.');
-    if (res.code === 'forbidden') { store.del('su-token'); remote.token = null; return showSignin('This Google account is not allowed.'); }
+    if (res.code === 'forbidden') { store.del('su-token'); store.del('su-cache'); remote.token = null; return showSignin('This Google account is not allowed.'); }
+    if (S.users.length) { if (res.code === 'network') toast('Offline: showing the last saved data'); flush(); return; }
     $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden');
     $('#view').replaceChildren(h('div', { class: 'card' }, h('div', { class: 'owe neg' }, 'Can’t load'), h('p', { class: 'sub' }, res.error || 'Unknown error'),
       h('button', { class: 'btn primary', onclick: boot }, 'Try again')));
     return;
   }
-  applyState(res.state);
+  if (seq === commitSeq) applyState(res.state);       // otherwise our own save landed meanwhile; the next refresh picks the rest up
   if (!S.me) S.me = S.users[0].email;
   $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden');
   if (!S.pots.length) S.pots = ['Main'];
-  if (form && S.pots.indexOf(form.pot) < 0) form.pot = S.pots[0];
+  if (form && pots().indexOf(form.pot) < 0) form.pot = pots()[0];
   render();
-  flushPending();
+  flush();
 }
 
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !busy && $('#sheet').open === false && tab !== 'add') boot(); });
-window.addEventListener('online', flushPending);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !flushing && !outbox.length && $('#sheet').open === false && tab !== 'add') boot(); });
+window.addEventListener('online', flush);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
 })();

@@ -58,11 +58,18 @@ data stored in the browser. Tap your name top-right to switch between Chris and 
 Code.gs changes: paste, then **Deploy → Manage deployments → edit → New version** (the URL stays the same).
 App changes: commit to GitHub.
 
+## Speed
+Changes show on screen immediately and are saved in the background (an "outbox" of operations, kept on the phone until
+the server confirms each one, in order). Every operation carries client-made IDs, so a dropped connection or a lost reply
+can be retried without double-counting. The last known data is cached so the app opens instantly.
+
 ## Tests
 ```
 node --test tests/ledger.test.js tests/parity.test.js
+python3 -I tests/ui_live.py docs     # needs Playwright; drives the app against a fake slow server
 ```
 `parity.test.js` runs the server's balance and validation code against the app's on hundreds of random ledgers, so they can't drift apart.
+`ui_live.py` checks instant saves, offline queueing, reload survival, lost-reply retries and stale-settle refusal.
 
 ## Known limits
 - Two people only (the percentage model is pairwise).

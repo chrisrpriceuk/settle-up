@@ -80,3 +80,36 @@ test('validate', () => {
   assert.ok(L.validate(Object.assign({}, ok, { description: ' ' }), [A, B]));
   assert.ok(L.validate(Object.assign({}, ok, { date: '01/01/2026' }), [A, B]));
 });
+
+test('applyOp: add is idempotent, void and edit behave', () => {
+  const e = { id: 'e1', type: 'expense', paid_by: A, amount_pence: 1000, other_share_pct: 50, pot: 'Main', date: '2026-01-01', description: 'x' };
+  let rows = L.applyOp([], { k: 'add', entry: e, by: A });
+  rows = L.applyOp(rows, { k: 'add', entry: e, by: A });          // retry
+  assert.equal(rows.length, 1);
+  assert.equal(L.balances(rows, A, B).Main, 500);
+  const e2 = Object.assign({}, e, { id: 'e2', amount_pence: 2000 });
+  rows = L.applyOp(rows, { k: 'edit', id: 'e1', entry: e2, by: A });
+  assert.equal(L.balances(rows, A, B).Main, 1000);                 // old voided, new counts
+  rows = L.applyOp(rows, { k: 'edit', id: 'e1', entry: e2, by: A }); // retried edit changes nothing
+  assert.equal(rows.length, 2);
+  rows = L.applyOp(rows, { k: 'void', id: 'e2', by: B });
+  assert.equal(L.balances(rows, A, B).Main || 0, 0);
+  assert.equal(rows.find((r) => r.id === 'e2').voided_by, B);
+});
+
+test('applyOp: a queued settle-up zeroes the pot once, even if applied twice', () => {
+  const rows = [ex(A, 1000, 50), ex(B, 300, 100, 'Holiday')];
+  const net = L.balances(rows, A, B);
+  const plan = L.settlementPlan(net, ua, ub, ['Main', 'Holiday'], '2026-02-01').map((p, i) => Object.assign({ id: 's' + i, group_id: 'g' }, p));
+  const op = { k: 'settle', plan, by: A };
+  const once = L.applyOp(rows, op), twice = L.applyOp(once, op);
+  assert.equal(twice.length, rows.length + 2);
+  const after = L.balances(twice, A, B);
+  assert.equal(after.Main, 0); assert.equal(after.Holiday, 0);
+});
+
+test('opPots reports pots an op introduces', () => {
+  assert.deepEqual(L.opPots({ k: 'pot', name: 'Dog' }), ['Dog']);
+  assert.deepEqual(L.opPots({ k: 'add', entry: { pot: 'Kids' } }), ['Kids']);
+  assert.deepEqual(L.opPots({ k: 'void', id: 'x' }), []);
+});

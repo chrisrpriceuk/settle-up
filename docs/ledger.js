@@ -87,5 +87,35 @@
     return plan;
   }
 
-  return { toPence, fmt, share, validate, balances, describe, settlementPlan };
+  /**
+   * Apply one queued operation to a list of rows. Pure and idempotent: applying the same op
+   * twice gives the same result, so retries and optimistic updates can never double-count.
+   *   {k:'add', entry}  {k:'void', id}  {k:'edit', id, entry}  {k:'settle', plan:[rows with ids]}
+   * `op.by` is the email of whoever made the change.
+   */
+  function applyOp(rows, op) {
+    const make = (e) => Object.assign({ status: 'active', created_at: new Date().toISOString(), created_by: op.by }, e);
+    switch (op.k) {
+      case 'add':
+        return rows.some((r) => r.id === op.entry.id) ? rows : rows.concat(make(op.entry));
+      case 'void':
+        return rows.map((r) => (r.id === op.id && r.status !== 'void' ? Object.assign({}, r, { status: 'void', voided_by: op.by }) : r));
+      case 'edit':
+        return applyOp(applyOp(rows, { k: 'void', id: op.id, by: op.by }), { k: 'add', entry: op.entry, by: op.by });
+      case 'settle':
+        return rows.concat(op.plan.filter((p) => !rows.some((r) => r.id === p.id)).map(make));
+      default:
+        return rows;
+    }
+  }
+
+  /** Pot names an operation introduces or touches. */
+  function opPots(op) {
+    if (op.k === 'pot') return [op.name];
+    if (op.k === 'add' || op.k === 'edit') return [op.entry.pot];
+    if (op.k === 'settle') return op.plan.map((p) => p.pot);
+    return [];
+  }
+
+  return { toPence, fmt, share, validate, balances, describe, settlementPlan, applyOp, opPots };
 });

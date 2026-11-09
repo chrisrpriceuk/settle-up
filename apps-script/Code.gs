@@ -35,7 +35,12 @@ function doPost(e) {
       case 'add':     return json_(locked_(function () { return add_(me, req.entry); }));
       case 'void':    return json_(locked_(function () { return void_(me, req.id); }));
       case 'edit':    return json_(locked_(function () { return edit_(me, req.id, req.entry); }));
-      case 'settle':  return json_(locked_(function () { return settle_(me, req.expected, req.date); }));
+      case 'settle': {
+        var out = locked_(function () { return settle_(me, req.expected, req.date, req.group, req.ids); });
+        var mail = out._mail; delete out._mail;
+        if (mail) notifySettle_(mail.me, config_(), mail.pots, mail.net);   // slow, so it runs after the lock is released
+        return json_(out);
+      }
       case 'addPot':  return json_(locked_(function () { return addPot_(req.name); }));
       default: throw fail_('bad_request', 'Unknown action');
     }
@@ -83,7 +88,7 @@ function verify_(idToken) {
   var match = cfg.users.filter(function (u) { return normEmail_(u.email) === email; })[0];
   if (!match) throw fail_('forbidden', 'This account is not allowed');
   // Always return the address as configured, so stored rows use one spelling per person.
-  cache.put(key, match.email, Math.max(1, Math.min(300, Math.floor((expMs - Date.now()) / 1000))));
+  cache.put(key, match.email, Math.max(1, Math.min(3000, Math.floor((expMs - Date.now()) / 1000) - 30)));
   return match.email;
 }
 
@@ -117,10 +122,10 @@ function add_(me, entry) {
   var cfg = config_();
   var row = normalise_(entry, cfg);
   var existing = findRow_(row.id);
-  if (existing) return { ok: true, duplicate: true, state: state_(me) };   // idempotent retry
+  if (existing) return { ok: true, duplicate: true };   // idempotent retry
   ensurePot_(row.pot);
   appendRow_(Object.assign(row, { created_by: me, group_id: row.group_id || '' }));
-  return { ok: true, state: state_(me) };
+  return { ok: true };
 }
 
 function void_(me, id) {
@@ -132,7 +137,7 @@ function void_(me, id) {
     sh.getRange(f.index, HEADERS.indexOf('voided_by') + 1).setValue(me);
     sh.getRange(f.index, HEADERS.indexOf('voided_at') + 1).setValue(new Date().toISOString());
   }
-  return { ok: true, state: state_(me) };
+  return { ok: true };
 }
 
 function edit_(me, id, entry) {
@@ -140,10 +145,11 @@ function edit_(me, id, entry) {
   var f = findRow_(id);
   if (!f) throw fail_('not_found', 'Entry not found');
   var row = normalise_(entry, cfg);
+  if (findRow_(row.id)) return { ok: true, duplicate: true };   // this edit already happened (retry)
   void_(me, id);
   ensurePot_(row.pot);
   appendRow_(Object.assign(row, { created_by: me, replaces: id }));
-  return { ok: true, state: state_(me) };
+  return { ok: true };
 }
 
 /**
@@ -151,30 +157,32 @@ function edit_(me, id, entry) {
  * If anything changed since, nothing is written and the fresh state is returned so the
  * user confirms the real figure rather than a stale one.
  */
-function settle_(me, expected, date) {
+function settle_(me, expected, date, group, ids) {
   var cfg = config_();
   var a = cfg.users[0], b = cfg.users[1];
   var rows = readRows_();
+  group = String(group || '');
+  if (group && rows.some(function (r) { return r.group_id === group; })) return { ok: true, duplicate: true };   // retry of a settle that already went through
   var net = balances_(rows, a.email, b.email);
+  ids = ids || {};
   var pots = Object.keys(expected || {});
   if (!pots.length) throw fail_('bad_request', 'Nothing to settle');
   for (var i = 0; i < pots.length; i++) {
     if ((net[pots[i]] || 0) !== expected[pots[i]])
       return { ok: false, code: 'conflict', error: 'Balances changed, please review and try again', state: state_(me) };
   }
-  var group = Utilities.getUuid();
+  group = group || Utilities.getUuid();
   var made = 0;
   pots.forEach(function (pot) {
     var n = net[pot] || 0;
     if (n === 0) return;
     appendRow_(normalise_({
-      id: Utilities.getUuid(), type: 'settlement', date: date, pot: pot, description: 'Settle up',
+      id: String(ids[pot] || Utilities.getUuid()), type: 'settlement', date: date, pot: pot, description: 'Settle up',
       amount_pence: Math.abs(n), paid_by: n > 0 ? b.email : a.email, other_share_pct: 100,
     }, cfg), { created_by: me, group_id: group });
     made++;
   });
-  if (made) notifySettle_(me, cfg, pots, net);
-  return { ok: true, state: state_(me) };
+  return made ? { ok: true, _mail: { me: me, pots: pots, net: net } } : { ok: true };
 }
 
 function addPot_(name) {
@@ -196,25 +204,32 @@ function sheet_(name) {
   return s;
 }
 
+function rowObj_(v) {
+  var o = {};
+  HEADERS.forEach(function (h, i) { o[h] = v[i]; });
+  o.amount_pence = Number(o.amount_pence);
+  o.other_share_pct = Number(o.other_share_pct);
+  o.date = dateStr_(o.date);
+  o.created_at = o.created_at instanceof Date ? o.created_at.toISOString() : String(o.created_at);
+  o.voided_at = o.voided_at instanceof Date ? o.voided_at.toISOString() : String(o.voided_at || '');
+  o.group_id = String(o.group_id || '');
+  return o;
+}
+
 function readRows_() {
   var sh = sheet_(TX_SHEET);
   var last = sh.getLastRow();
   if (last < 2) return [];
-  var vals = sh.getRange(2, 1, last - 1, HEADERS.length).getValues();
-  return vals.map(function (v) {
-    var o = {};
-    HEADERS.forEach(function (h, i) { o[h] = v[i]; });
-    o.amount_pence = Number(o.amount_pence);
-    o.other_share_pct = Number(o.other_share_pct);
-    o.date = dateStr_(o.date);
-    o.created_at = o.created_at instanceof Date ? o.created_at.toISOString() : String(o.created_at);
-    o.voided_at = o.voided_at instanceof Date ? o.voided_at.toISOString() : String(o.voided_at || '');
-    return o;
-  }).filter(function (o) { return o.id; });
+  return sh.getRange(2, 1, last - 1, HEADERS.length).getValues().map(rowObj_).filter(function (o) { return o.id; });
 }
 
+var TZ_ = null;
+function tz_() { return TZ_ || (TZ_ = ss_().getSpreadsheetTimeZone()); }   // looked up once per request, not once per row
+
 function dateStr_(d) {
-  if (d instanceof Date) return Utilities.formatDate(d, 'Etc/UTC', 'yyyy-MM-dd');
+  // Sheets turns '2026-07-01' into a date at midnight in the SPREADSHEET's time zone, so read it back in that zone
+  // (UTC would shift summer dates back a day).
+  if (d instanceof Date) return Utilities.formatDate(d, tz_(), 'yyyy-MM-dd');
   return String(d);
 }
 
@@ -223,10 +238,10 @@ function findRow_(id) {
   var last = sh.getLastRow();
   if (last < 2) return null;
   var ids = sh.getRange(2, 1, last - 1, 1).getValues();
-  for (var i = 0; i < ids.length; i++) {
+  for (var i = ids.length - 1; i >= 0; i--) {          // newest first: retries usually concern recent rows
     if (ids[i][0] === id) {
-      var rows = readRows_();
-      return { index: i + 2, row: rows[i] };
+      var v = sh.getRange(i + 2, 1, 1, HEADERS.length).getValues()[0];
+      return { index: i + 2, row: rowObj_(v) };
     }
   }
   return null;
