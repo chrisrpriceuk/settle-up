@@ -698,6 +698,35 @@ async function boot() {
 
 document.addEventListener('visibilitychange', () => { if (!document.hidden && !flushing && !outbox.length && $('#sheet').open === false && tab !== 'add') boot(); });
 window.addEventListener('online', flush);
+
+// Pick up newly deployed code: compare the published files with what this page loaded.
+// Reload quietly when nothing is in flight; otherwise offer an "Update" button.
+let loadedSig = null, updateShown = false;
+async function siteSig() {
+  const hash = (t) => { let x = 5381; for (let i = 0; i < t.length; i++) x = ((x * 33) ^ t.charCodeAt(i)) >>> 0; return t.length + ':' + x; };
+  const get = async (u) => { const r = await fetch(u + (u.indexOf('?') < 0 ? '?' : '&') + 'v=' + Date.now(), { cache: 'no-store' }); if (!r.ok) throw 0; return r.text(); };
+  return hash(await get('index.html')) + '|' + hash(await get('ledger.js'));
+}
+function safeToReload() {
+  return !flushing && !outbox.length && $('#sheet').open === false && (tab !== 'add' || !form || (!form.amount && !form.description));
+}
+async function checkForUpdate() {
+  if (!location.protocol.startsWith('http') || updateShown || document.hidden || !navigator.onLine) return;
+  try {
+    const sig = await siteSig();
+    if (loadedSig === null) { loadedSig = sig; return; }
+    if (sig === loadedSig) return;
+    if (safeToReload()) { location.reload(); return; }
+    updateShown = true;
+    const b = h('div', { class: 'banner', style: 'position:fixed;left:8px;right:8px;bottom:8px;z-index:50;display:flex' },
+      h('span', {}, 'A new version is ready.'),
+      h('button', { onclick: () => location.reload() }, 'Update'));
+    document.body.append(b);
+  } catch (e) { /* offline or mid-deploy: try again later */ }
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkForUpdate(); });
+setInterval(checkForUpdate, 5 * 60 * 1000);
+setTimeout(checkForUpdate, 3000);
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) navigator.serviceWorker.register('sw.js').catch(() => {});
 boot();
 })();

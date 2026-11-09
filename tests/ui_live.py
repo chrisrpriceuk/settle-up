@@ -235,6 +235,28 @@ async def main(root):
         check('after the script is updated no stale warning flashes up from the cache', 'out of date' not in await txt())
         await pg.wait_for_timeout(1800)
         check('and it is still gone once fresh data arrives', 'out of date' not in await txt())
+        # 9. newly deployed code is picked up: quiet reload when idle, an Update button when a form is half filled
+        tweak = {'on': False}
+        async def maybe_tweak(route):
+            r = route.request
+            if tweak['on'] and r.url.split('?')[0].endswith('/index.html') and 'v=' in r.url:
+                resp = await route.fetch(); body = await resp.text()
+                await route.fulfill(response=resp, body=body + '<!-- new build -->')
+            else: await route.continue_()
+        await pg.route('**/index.html*', maybe_tweak)
+        await pg.reload(); await pg.wait_for_selector('.card'); await pg.wait_for_timeout(3600)   # baseline is taken ~3s after load
+        await pg.evaluate("window.__marker = 1")
+        await pg.click('nav [data-tab=add]'); await pg.locator('input[inputmode=decimal]').first.fill('9.99')
+        tweak['on'] = True
+        await pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        await pg.wait_for_function("document.body.innerText.indexOf('new version is ready')>=0", timeout=8000)
+        check('half-filled form: shows an Update button instead of reloading', await pg.evaluate("window.__marker") == 1)
+        await pg.reload(); await pg.wait_for_selector('.card'); await pg.wait_for_timeout(3600)   # baseline now includes the tweak
+        tweak['on'] = False
+        await pg.evaluate("window.__marker = 1")
+        await pg.evaluate("document.dispatchEvent(new Event('visibilitychange'))")
+        await pg.wait_for_function("window.__marker === undefined", timeout=8000)
+        check('idle app reloads itself when new code is published', True)
         check('no JS errors', not errs, errs)
         await b.close()
     print('\nFAILED: ' + ', '.join(fails) if fails else '\nALL PASSED')
