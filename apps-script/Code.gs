@@ -36,9 +36,9 @@ function doPost(e) {
       case 'void':    return json_(locked_(function () { return void_(me, req.id); }));
       case 'edit':    return json_(locked_(function () { return edit_(me, req.id, req.entry); }));
       case 'settle': {
-        var out = locked_(function () { return settle_(me, req.expected, req.date, req.group, req.ids); });
+        var out = locked_(function () { return settle_(me, req.expected, req.date, req.group, req.ids, req.amounts); });
         var mail = out._mail; delete out._mail;
-        if (mail) notifySettle_(mail.me, config_(), mail.pots, mail.net);   // slow, so it runs after the lock is released
+        if (mail) notifySettle_(mail.me, config_(), mail.settled, mail.net);   // slow, so it runs after the lock is released
         return json_(out);
       }
       case 'addPot':  return json_(locked_(function () { return addPot_(req.name); }));
@@ -157,7 +157,7 @@ function edit_(me, id, entry) {
  * If anything changed since, nothing is written and the fresh state is returned so the
  * user confirms the real figure rather than a stale one.
  */
-function settle_(me, expected, date, group, ids) {
+function settle_(me, expected, date, group, ids, amounts) {
   var cfg = config_();
   var a = cfg.users[0], b = cfg.users[1];
   var rows = readRows_();
@@ -171,18 +171,28 @@ function settle_(me, expected, date, group, ids) {
     if ((net[pots[i]] || 0) !== expected[pots[i]])
       return { ok: false, code: 'conflict', error: 'Balances changed, please review and try again', state: state_(me) };
   }
-  group = group || Utilities.getUuid();
-  var made = 0;
+  // A payment may be less than the balance (a part payment), never more. Check everything before writing anything.
+  amounts = amounts || {};
+  var settled = {};
   pots.forEach(function (pot) {
     var n = net[pot] || 0;
     if (n === 0) return;
-    appendRow_(normalise_({
-      id: String(ids[pot] || Utilities.getUuid()), type: 'settlement', date: date, pot: pot, description: 'Settle up',
-      amount_pence: Math.abs(n), paid_by: n > 0 ? b.email : a.email, other_share_pct: 100,
-    }, cfg), { created_by: me, group_id: group });
-    made++;
+    var amt = amounts[pot] == null ? Math.abs(n) : Number(amounts[pot]);
+    if (!isFinite(amt) || Math.floor(amt) !== amt || amt <= 0 || amt > Math.abs(n))
+      throw fail_('invalid', 'A payment must be more than zero and no more than what is owed');
+    settled[pot] = amt;
   });
-  return made ? { ok: true, _mail: { me: me, pots: pots, net: net } } : { ok: true };
+  group = group || Utilities.getUuid();
+  Object.keys(settled).forEach(function (pot) {
+    var n = net[pot];
+    appendRow_(normalise_({
+      id: String(ids[pot] || Utilities.getUuid()), type: 'settlement', date: date, pot: pot,
+      description: settled[pot] < Math.abs(n) ? 'Part payment' : 'Settle up',
+      amount_pence: settled[pot], paid_by: n > 0 ? b.email : a.email, other_share_pct: 100,
+    }, cfg), { created_by: me, group_id: group });
+  });
+  var any = Object.keys(settled).length > 0;
+  return any ? { ok: true, settled: settled, _mail: { me: me, settled: settled, net: net } } : { ok: true, settled: {} };
 }
 
 function addPot_(name) {
@@ -374,13 +384,16 @@ function weeklyDigest() {
   }
 }
 
-function notifySettle_(me, cfg, pots, net) {
+function notifySettle_(me, cfg, settled, net) {
   try {
     var other = cfg.users.filter(function (u) { return u.email !== me; })[0];
     var who = cfg.users.filter(function (u) { return u.email === me; })[0];
-    var parts = pots.filter(function (p) { return net[p]; }).map(function (p) { return p + ' (' + money_(Math.abs(net[p]), cfg.currency) + ')'; });
-    MailApp.sendEmail({ to: other.email, subject: 'Settle Up: ' + who.name + ' recorded a settlement',
-      body: who.name + ' settled up: ' + parts.join(', ') + '.', name: 'Settle Up' });
+    var parts = Object.keys(settled).map(function (p) {
+      var left = Math.abs(net[p]) - settled[p];
+      return p + ': ' + money_(settled[p], cfg.currency) + (left > 0 ? ' (part payment, ' + money_(left, cfg.currency) + ' still owed)' : ' (settled)');
+    });
+    MailApp.sendEmail({ to: other.email, subject: 'Settle Up: ' + who.name + ' recorded a payment',
+      body: who.name + ' recorded a payment.\n\n' + parts.join('\n'), name: 'Settle Up' });
   } catch (e) { console.error('notifySettle failed', e); }
 }
 

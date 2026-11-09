@@ -117,5 +117,17 @@
     return [];
   }
 
-  return { toPence, fmt, share, validate, balances, describe, settlementPlan, applyOp, opPots };
+  /**
+   * Display order for pots: "Main" first (even at zero), then pots with a balance, then settled
+   * pots; each group alphabetical.
+   */
+  function sortPots(pots, net) {
+    const isMain = (p) => String(p).toLowerCase() === 'main';
+    const owed = (p) => (net[p] || 0) !== 0;
+    const alpha = (a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' });
+    const rest = pots.filter((p) => !isMain(p));
+    return pots.filter(isMain).concat(rest.filter(owed).sort(alpha), rest.filter((p) => !owed(p)).sort(alpha));
+  }
+
+  return { toPence, fmt, share, validate, balances, describe, settlementPlan, applyOp, opPots, sortPots };
 });

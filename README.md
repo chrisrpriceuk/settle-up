@@ -65,7 +65,7 @@ can be retried without double-counting. The last known data is cached so the app
 
 ## Tests
 ```
-node --test tests/ledger.test.js tests/parity.test.js
+node --test tests/*.test.js
 python3 -I tests/ui_live.py docs     # needs Playwright; drives the app against a fake slow server
 ```
 `parity.test.js` runs the server's balance and validation code against the app's on hundreds of random ledgers, so they can't drift apart.

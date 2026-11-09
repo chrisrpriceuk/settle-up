@@ -45,10 +45,17 @@ class Server:
             net = self.net()
             for pot, n in q['expected'].items():
                 if net.get(pot, 0) != n: return dict(ok=False, code='conflict', error='Balances changed, please review and try again', state=self.state())
+            amounts = q.get('amounts', {}); settled = {}
             for pot, n in q['expected'].items():
-                if n: self.rows.append(dict(id=q['ids'][pot], type='settlement', date=q['date'], description='Settle up', amount_pence=abs(n),
-                                            paid_by=B if n > 0 else A, other_share_pct=100, pot=pot, status='active', created_by=A, created_at='now', group_id=q['group']))
-            return dict(ok=True)
+                if not n: continue
+                amt = amounts.get(pot, abs(n))
+                if not (0 < amt <= abs(n)): return dict(ok=False, code='invalid', error='A payment must be more than zero and no more than what is owed')
+                settled[pot] = amt
+            for pot, amt in settled.items():
+                n = q['expected'][pot]
+                self.rows.append(dict(id=q['ids'][pot], type='settlement', date=q['date'], description='Part payment' if amt < abs(n) else 'Settle up', amount_pence=amt,
+                                      paid_by=B if n > 0 else A, other_share_pct=100, pot=pot, status='active', created_by=A, created_at='now', group_id=q['group']))
+            return dict(ok=True, settled=settled)
         return dict(ok=False, code='bad_request', error='?')
 
 async def main(root):
@@ -141,6 +148,47 @@ async def main(root):
         await pg.wait_for_timeout(300)
         check('screen now shows the true balance (you owe Natalie £11.50)', 'You owe Natalie £11.50' in await txt(), (await txt())[:90].replace(chr(10),' | '))
         check('server and screen agree', S.net()['Main'] == -1150, S.net())
+
+        # 6. part payment: overtype a smaller amount
+        await pg.click('nav [data-tab=home]')
+        await pg.click('text=Settle up Main'); await pg.wait_for_selector('dialog[open]')
+        inp = pg.locator('dialog input')
+        check('confirmation pre-fills the full amount', await inp.input_value() == '11.50', await inp.input_value())
+        await inp.fill('20')
+        check('overpaying is flagged', 'more than' in (await pg.inner_text('dialog')).lower())
+        check('overpaying disables the button', await pg.locator('dialog button.primary').is_disabled())
+        await inp.fill('0')
+        check('zero is rejected', await pg.locator('dialog button.primary').is_disabled())
+        await inp.fill('5')
+        check('part amount shows what remains', '£6.50 will still be owed' in await pg.inner_text('dialog'), (await pg.inner_text('dialog'))[-160:].replace(chr(10), ' | '))
+        check('button says Record payment', 'Record payment' in await pg.locator('dialog button.primary').inner_text())
+        t0 = time.time(); await pg.click('dialog button.primary'); await pg.wait_for_selector('.toast'); dt = time.time() - t0
+        check('part payment confirms instantly', dt < 0.5, f'{dt:.2f}s')
+        check('screen shows the reduced balance at once', 'You owe Natalie £6.50' in await txt(), (await txt())[:70].replace(chr(10), ' | '))
+        await pg.wait_for_function("document.querySelector('#sync').textContent.indexOf('Saving')<0", timeout=8000)
+        part = [r for r in S.rows if r['description'] == 'Part payment']
+        check('server stored a £5.00 part payment', len(part) == 1 and part[0]['amount_pence'] == 500, part)
+        check('server balance matches the screen', S.net()['Main'] == -650, S.net())
+        # the rest, in full
+        await pg.click('text=Settle up Main'); await pg.wait_for_selector('dialog[open]')
+        check('next settle pre-fills the remainder', await pg.locator('dialog input').input_value() == '6.50')
+        await pg.click('dialog button.primary'); await pg.wait_for_function("document.querySelector('#sync').textContent.indexOf('Saving')<0", timeout=8000)
+        check('remainder settles to zero', S.net()['Main'] == 0, S.net())
+
+        # 7. pot order: Main first even at zero; then pots with a balance; then settled; each A-Z
+        S.pots += ['Zoo', 'Alpha', 'Holiday']
+        S.rows.append(dict(id='z1', type='expense', date='2026-11-09', description='Zoo trip', amount_pence=4000, paid_by=A, other_share_pct=50, pot='Zoo', status='active', created_by=A, created_at='now', group_id=''))
+        S.rows.append(dict(id='h1', type='expense', date='2026-11-09', description='Hotel', amount_pence=2000, paid_by=B, other_share_pct=50, pot='Holiday', status='active', created_by=B, created_at='now', group_id=''))
+        await pg.reload(); await pg.wait_for_selector('.card')
+        await pg.wait_for_function("document.querySelectorAll('.pot-name').length>=4", timeout=8000)
+        order = [s.strip().lower() for s in await pg.locator('.pot-name').all_inner_texts()]
+        check('Home order: Main (settled) first, then balances A-Z, then settled A-Z', order == ['main', 'holiday', 'zoo', 'alpha'], order)
+        await pg.click('nav [data-tab=history]')
+        chips = [s.strip().lower() for s in await pg.locator('.chip').all_inner_texts()]
+        check('History filter uses the same order', chips == ['all', 'main', 'holiday', 'zoo', 'alpha'], chips)
+        await pg.click('nav [data-tab=add]')
+        chips = [s.strip().lower() for s in await pg.locator('label:has-text("Pot") + .chips .chip').all_inner_texts()]
+        check('Add form pot chips use the same order', chips[:4] == ['main', 'holiday', 'zoo', 'alpha'], chips)
         check('no JS errors', not errs, errs)
         await b.close()
     print('\nFAILED: ' + ', '.join(fails) if fails else '\nALL PASSED')

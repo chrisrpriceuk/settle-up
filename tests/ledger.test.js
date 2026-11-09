@@ -113,3 +113,16 @@ test('opPots reports pots an op introduces', () => {
   assert.deepEqual(L.opPots({ k: 'add', entry: { pot: 'Kids' } }), ['Kids']);
   assert.deepEqual(L.opPots({ k: 'void', id: 'x' }), []);
 });
+
+test('sortPots: Main first, then pots with a balance, then settled; each alphabetical', () => {
+  const pots = ['Zoo', 'Holiday', 'main', 'Dog', 'Boiler', 'Kids'];
+  const net = { Holiday: 500, Zoo: -100, Kids: 0, Dog: 0 };           // Boiler & Main have no entries
+  assert.deepEqual(L.sortPots(pots, net), ['main', 'Holiday', 'Zoo', 'Boiler', 'Dog', 'Kids']);
+  // Main stays on top whether or not it has a balance
+  assert.equal(L.sortPots(['Dog', 'Main'], { Dog: 5, Main: 9 })[0], 'Main');
+  assert.equal(L.sortPots(['Dog', 'Main'], { Dog: 5 })[0], 'Main');
+  // no Main at all: just balance-first then alphabetical
+  assert.deepEqual(L.sortPots(['b', 'a', 'c'], { c: 1 }), ['c', 'a', 'b']);
+  // does not mutate its input
+  const input = ['b', 'a']; L.sortPots(input, {}); assert.deepEqual(input, ['b', 'a']);
+});
