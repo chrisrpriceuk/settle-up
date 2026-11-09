@@ -1,6 +1,6 @@
 // Offline shell. Same-origin files only; the API (script.google.com) is never cached.
-const CACHE = 'settle-up-v1';
-const SHELL = ['./', 'index.html', 'ledger.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
+const CACHE = 'settle-up-v2';
+const SHELL = ['./', 'index.html', 'ledger.js', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'favicon.svg', 'favicon-32.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
