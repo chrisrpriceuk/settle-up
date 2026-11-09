@@ -323,7 +323,7 @@ async function flush() {
       const op = outbox[0];
       const res = await api.send(op);
       if (res.ok) {
-        commit(op); outbox.shift(); saveOutbox(); render();
+        commit(op); outbox.shift(); saveOutbox(); refresh();
         const partial = op.k === 'settle' && op.plan.some(p => p.amount_pence < Math.abs(op.expected[p.pot] || 0));
         if (partial && LIVE && !res.duplicate && !res.settled) {   // an older server script ignores part payments
           toast('Your server script is out of date, so this may have been recorded as a full settle-up. Update it, then check History.', { bad: true, ms: 15000 });
@@ -336,10 +336,10 @@ async function flush() {
         outbox.shift(); saveOutbox();
         if (res.state) applyState(res.state);
         toast(res.error || 'That change could not be saved', { bad: true });
-        render();
+        refresh();
       }
     }
-  } finally { flushing = false; render(); }
+  } finally { flushing = false; refresh(); }
 }
 
 /* ───── ui feedback ───── */
@@ -369,7 +369,8 @@ function closeSheet() { const d = $('#sheet'); if (d.open) d.close(); }
 $('#sheet').addEventListener('click', (e) => { if (e.target === $('#sheet')) closeSheet(); });
 
 /* ───── rendering ───── */
-function render() {
+/** Header, tab highlight and the Saving… line. Cheap, and never disturbs what you are typing. */
+function renderChrome() {
   document.querySelectorAll('nav button').forEach(b => b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'));
   const me = meUser();
   const who = $('#who'); who.replaceChildren(h('span', { class: 'avatar' }, (me.name || '?')[0].toUpperCase()), me.name);
@@ -379,8 +380,16 @@ function render() {
   if (outbox.some(o => o.stuck)) sync.append(h('b', {}, outbox.length + ' waiting to sync'));
   else if (outbox.length) sync.append('Saving…');
   else if (!LIVE) sync.append('Demo mode: nothing leaves this device');
-  const v = $('#view');
-  v.replaceChildren(tab === 'home' ? viewHome() : tab === 'add' ? viewAdd() : viewHistory());
+}
+/** Full redraw: use after the person does something (navigates, submits, taps a chip). */
+function render() {
+  renderChrome();
+  $('#view').replaceChildren(tab === 'home' ? viewHome() : tab === 'add' ? viewAdd() : viewHistory());
+}
+/** Redraw after something happened in the BACKGROUND (a save finished, fresh data arrived).
+ *  On the Add tab the form is left alone: rebuilding it would throw away the cursor mid-typing. */
+function refresh() {
+  if (tab === 'add') renderChrome(); else render();
 }
 
 function oweLine(netMine, o) {
@@ -673,7 +682,7 @@ async function boot() {
   $('#signin').classList.add('hidden'); $('#app').classList.remove('hidden');
   if (!S.pots.length) S.pots = ['Main'];
   if (form && pots().indexOf(form.pot) < 0) form.pot = pots()[0];
-  render();
+  refresh();
   flush();
 }
 

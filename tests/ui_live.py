@@ -111,6 +111,19 @@ async def main(root):
         await pg.wait_for_function("document.querySelector('#sync').textContent.indexOf('Saving')<0", timeout=8000)
         check('server balance is zero after settle', S.net().get('Main', 0) == 0, S.net())
 
+        # 2b. typing while the previous item is still saving must not lose focus or characters
+        idle = "document.querySelector('#sync').textContent.indexOf('Saving')<0"
+        await pg.click('nav [data-tab=add]'); await pg.fill('#amt', '1'); await pg.fill('#desc', 'Tea')
+        await pg.click('button.chip:text-is("0%")')                      # personal item: no effect on balances
+        await pg.click('button[type=submit]'); await pg.wait_for_selector('.toast')
+        check('previous item is still saving when the next one is started', 'Saving' in await pg.inner_text('#sync'))
+        await pg.click('#amt'); await pg.keyboard.type('7')
+        await pg.wait_for_function(idle, timeout=8000)                    # the background save finishes while the field is focused
+        check('focus stays in the field after a background save', await pg.evaluate("document.activeElement.id") == 'amt', await pg.evaluate("document.activeElement.tagName"))
+        await pg.keyboard.type('5')
+        check('typing carries on without losing characters', await pg.input_value('#amt') == '75', await pg.input_value('#amt'))
+        await pg.fill('#amt', ''); await pg.fill('#desc', '')
+
         # 3. offline: entry kept, flagged, then syncs on reconnect without duplicating
         S.online = False
         await pg.click('nav [data-tab=add]'); await pg.fill('#amt', '12'); await pg.fill('#desc', 'Offline coffee'); await pg.click('button[type=submit]')
